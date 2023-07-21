@@ -1,0 +1,203 @@
+##
+##  A generic Makefile for OCaml projects
+##
+
+# WARNING: This is hacky and probably broken; use dune.
+
+# standalone programs to produce and corresponding OCaml modules, in same order:
+EXES  = prgm      test
+MAINS = Prgm_main Test
+Prgm_main_MODULES = Util Debug Sexp Printers Prgm Prgm_main
+Test_MODULES      = Util Debug Sexp Printers Test
+
+# directories:
+SRCDIR   = src
+BUILDDIR = _build
+DOCDIR   = $(BUILDDIR)/doc
+
+# findlib’s packages:
+PACKAGES = batteries
+
+# compilation options:
+CFLAGS = -g
+LFLAGS = -g
+DOCFLAGS = -stars
+
+# uncomment to get output for debugging the Makefile:
+#DEBUG_COMP = true    # debug compilation
+#DEBUG_DEP  = true    # debug dependencies generation
+
+#
+# Everything from here should work magically…
+#
+
+# Flags for linking, useful for several commands.
+PACKAGES_FLAGS = $(foreach p,$(PACKAGES),-package $p)
+LINKING_FLAGS = $(PACKAGES_FLAGS) -I $(BUILDDIR)
+
+# Command line programs.
+COMPILER  = ocamlfind ocamlopt $(LINKING_FLAGS)  -c
+LINKER    = ocamlfind ocamlopt $(PACKAGES_FLAGS) -linkpkg
+DOCENGINE = ocamlfind ocamldoc $(LINKING_FLAGS)  -html -charset utf-8
+#DEPCMD = ocamldep -one-line -native -I $(SRCDIR) $(SRCDIR)/$1 \
+          |sed 's,\(^\| \)$(SRCDIR)/,\1$(BUILDDIR)/,g'
+	# There is no way to tell ocamldep about different src and build folders,
+	# hence the ‘sed’ trick (which implies that to pass arguments to ‘ocamldep’
+	# a function is needed instead of a simple variable).
+DEPCMD = ( cd $(SRCDIR) && ocamldep -one-line -native $1 ) \
+         |tail -1 \
+         |sed 's,\( [^ ]*\)\.cm[ox],\1.cmi,g' \
+         |sed 's,\(^\| \)\b,\1$(BUILDDIR)/,g'
+	# First switching to the source directory make things is a bit easier…
+	# The ‘tail’ command is here to ignore the rules for .cmo targets.
+	# We actually want to depend solely on .cmi files, not on .cm[ox] files,
+	# even if the implied module does not have a .ml source file (we still
+	# generate a .cmi file from the .ml). That’s the purpose of the first ‘sed’.
+	# The second ‘sed’ fixes the directories.
+
+# Files to act on.
+SRC = $(wildcard $(SRCDIR)/*.ml $(SRCDIR)/*.mli) # existing source files (.ml and .mli)
+DEP = $(SRC:$(SRCDIR)/%=$(BUILDDIR)/%.dep)       # associated dependency files (for .cmx and .cmi)
+ML  = $(filter %.ml,$(SRC))
+MLI = $(filter %.mli,$(SRC))
+ML-I = $(filter-out $(MLI),$(ML:%=%i))        # missing .mli source files
+DEP-I = $(ML-I:$(SRCDIR)/%=$(BUILDDIR)/%.dep) # associated dependency files (for .cmi)
+ALLDEP = $(DEP) $(DEP-I)
+MOD = $(sort $(patsubst $(SRCDIR)/%,%,$(basename $(SRC)))) # all module names
+CMI = $(MOD:%=$(BUILDDIR)/%.cmi)                           # all .cmi files
+#DOC = $(MOD:%=$(DOCDIR)/%.html)
+
+# Convenient alias to silently create every directory needed.
+# 	http://stackoverflow.com/a/1951111
+dir_guard = @mkdir -p $(@D)
+
+# Uncomment this to treat all recipe commands in a single shell (as opposed to
+# one shell per line).
+#.ONESHELL:
+
+# Note: the stem (‘%’) is expanded after variables and function calls, such as
+# ‘$(shell)’ — which are expanded during parsing. To be able to access it within
+# a function call in prerequisites, one must escape this call with the secondary
+# expansion trick (‘$$(shell)’).
+# Additionally, when secondary expansion is used, the automatic variable ‘$*’,
+# whose value is the contents of the stem, is made available; thus one may also
+# use it in prerequisites (in its escaped form: ‘$$*’) instead of ‘%’.
+# Moreover, there seems to be limitations on ‘%’: only the first one is expanded
+# within a blank-separated word and, if secondary expansion is used, within an
+# escaped function call — e.g. ‘$$(wildcard % %)’ — too. Use ‘$$*’ for further
+# uses. That’s weird.
+# 	http://stackoverflow.com/a/9533980
+# 	http://stackoverflow.com/questions/21950663
+# To include a literal ‘%’ in a prerequisite (for example as a pattern for the
+# function ‘patsubst’), one must hide it in a variable. In the presence of
+# secondary expansion, the hiding variable must be escaped (‘$$(PERC)’), or it
+# will be expanded as the stem the second time.
+# 	http://stackoverflow.com/questions/19232784
+PERC := %
+
+# Fake targets listed below.
+.PHONY: all dep exe doc clean
+
+# Default target.
+default: exe
+
+# Target “all” for building everything from scratch.
+all: clean exe doc
+
+# Target “exe” for building all executables.
+exe: $(EXES)
+
+# Executable targets (symbolic links to actual .exe files in $(BUILDDIR)).
+$(EXES):
+	$(dir_guard)
+	ln -sf $^ $@
+# automatic generation of the dependencies “myprgm: _build/MyMainModule.exe”:
+EXERULES = $(join $(EXES),$(MAINS:%=:$(BUILDDIR)/%.exe))
+$(foreach rule,$(EXERULES),$(eval $(rule)))
+
+# .exe (executable) files.
+#$(BUILDDIR)/%.exe: $(BUILDDIR)/%.cmx
+#	$(dir_guard)
+#	$(LINKER)   $(LFLAGS) $< -o $@
+
+# In fact, a bit of work is needed to compute the .cmx dependencies for linking
+# an executable…
+#.SECONDEXPANSION:
+#$(BUILDDIR)/%.exe: $$(shell $$(call DEPCMD,$$*.ml) |cut -d\: -f2-) $(BUILDDIR)/%.cmx
+#	$(dir_guard)
+#	$(LINKER)   $(LFLAGS) $(filter %.cmx,$^) -o $@
+
+# … In fact, ocamldep is not even powerful enough (does not handle recursive
+# dependencies), so we just handle dependencies manually…
+.SECONDEXPANSION:
+$(BUILDDIR)/%.exe: $$(patsubst $$(PERC),$(BUILDDIR)/$$(PERC).cmx,$$(%_MODULES))
+	$(dir_guard)
+	$(LINKER)   $(LFLAGS) $^ -o $@
+
+# .cmx (compiled module) files.
+$(BUILDDIR)/%.cmx: $(SRCDIR)/%.ml
+	$(dir_guard)
+	$(COMPILER) $(CFLAGS) $< -o $@
+ifdef DEBUG_COMP
+	@echo -ne '\e[32m'
+	@ls -l $(BUILDDIR)/$*.*
+	@echo -ne '\e[0m'
+endif
+
+# .cmi (compiled interface) files.
+# We use the .ml file as a fallback if no .mli file is present.
+.SECONDEXPANSION:
+$(BUILDDIR)/%.cmi: $$(firstword $$(wildcard $(SRCDIR)/$$*.mli $(SRCDIR)/$$*.ml))
+	$(dir_guard)
+	$(COMPILER) $(CFLAGS) $< -o $@
+ifdef DEBUG_COMP
+	@echo -ne '\e[33m'
+	@ls -l $(BUILDDIR)/$*.*
+	@echo -ne '\e[0m'
+endif
+#.PRECIOUS: $(BUILDDIR)/%.cmi    # Prevent the removal of .cmi files.
+
+# Target “dep” for asking explicitly the automatically generated dependencies.
+dep: $(ALLDEP)
+#.PRECIOUS: $(BUILDDIR)/%.dep    # Prevent the removal of .dep files.
+
+# Automatic dependencies generation for .cm* files.
+$(BUILDDIR)/%.dep: $(SRCDIR)/%
+	$(dir_guard)
+	@$(call DEPCMD,$*) > $@
+ifdef DEBUG_DEP
+	@echo -ne '\e[34m'
+	@cat $@
+	@echo -ne '\e[0m'
+endif
+
+# Automatic dependencies generation for .cmi files where no .mli file exists (in
+# that case we just pick the dependencies of the associated .cmx file since it
+# is actually the same command which is used to build both).
+$(DEP-I): $(BUILDDIR)/%i.dep: $(SRCDIR)/%
+	$(dir_guard)
+	@$(call DEPCMD,$*) | sed 's,.cm[ox] :,.cmi :,' > $@
+ifdef DEBUG_DEP
+	@echo -ne '\e[36m'
+	@cat $@
+	@echo -ne '\e[0m'
+endif
+
+-include $(ALLDEP)
+
+# Target “doc” for building the HTML documentation.
+doc: $(DOCDIR)/index.html
+
+# HTML documentation.
+$(DOCDIR)/index.html: $(SRC) $(CMI) Makefile
+	$(dir_guard)
+	$(DOCENGINE) $(DOCFLAGS) $(SRC) -d $(DOCDIR)
+
+# Target “clean” for clearing everything produced.
+clean:
+	rm -f $(EXES)
+	rm -fr $(BUILDDIR)
+
+# TODO:
+# – read http://make.mad-scientist.net/papers/advanced-auto-dependency-generation/
+# – keep in mind http://www.conifersystems.com/whitepapers/gnu-make/

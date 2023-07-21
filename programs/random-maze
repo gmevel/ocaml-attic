@@ -1,0 +1,216 @@
+#!/bin/env ocaml
+
+type cell = {mutable visited :bool; mutable bottom :bool; mutable right :bool}
+type maze = int * int * cell array array
+type position = int * int
+type direction = Left | Top | Right | Bottom
+type move = position * direction
+
+let cell bottom right = {visited = false; bottom; right}
+
+let string_of_maze (w, h, cells) =
+  let rec string_of_corner i j =
+    let symbols =
+     [| " "; "╴"; "╵"; "┘"; "╶"; "─"; "└"; "┴";
+        "╷"; "┐"; "│"; "┤"; "┌"; "┬"; "├"; "┼" |]  in
+    let int_of_bool = function
+      | false -> 0
+      | true  -> 1
+    in
+    let left   = int_of_bool ( j > 0 && (i = 0 || cells.(i-1).(j-1).bottom) )
+    and right  = int_of_bool ( j < w && (i = 0 || cells.(i-1).(j).bottom)   )
+    and top    = int_of_bool ( i > 0 && (j = 0 || cells.(i-1).(j-1).right) )
+    and bottom = int_of_bool ( i < h && (j = 0 || cells.(i).(j-1).right)   )  in
+    let code = left + 2*top + 4*right + 8*bottom  in
+    (if j > 0 then if left=1 then "─" else " " else "") ^ symbols.(code)
+  in
+  let str = ref "" in
+  for i = 0 to h do
+    for j = 0 to w do
+      str := !str ^ string_of_corner i j
+    done;
+    str := !str ^ "\n"
+  done;
+  !str
+let print_maze maze = print_string (string_of_maze maze)
+
+exception Break
+
+let random_maze w h straight_coeff =
+  let cells =
+   Array.init w (fun _ ->
+    Array.init h (fun _ -> cell true true) )  in
+  let moves = ref []  in
+  (*let insert_move move coeff =
+    let weight = coeff * Random.int 1000  in
+    let rec insert = function
+      | (s,w)::q when w > weight  -> (s,w) :: insert q
+      | _ as l  -> (move,weight)::l
+    in
+    moves := insert !moves
+  in
+  let pop_move () =
+    match !moves with
+    | []        -> raise Break
+    | (s,_)::q  -> moves := q; s
+  in
+  let coeff dir dir' = match dir, dir' with
+    | Left, Left
+    | Left, Right
+    | Right, Left
+    | Right, Right
+    | Top, Top
+    | Top, Bottom
+    | Bottom, Top
+    | Bottom, Bottom  -> straight_coeff
+    | _               -> 1
+  in*)
+  let insert_move move _ =
+    moves := move :: !moves
+  in
+  let pop_move () =
+    let rec pop_nth l = function
+      | 0  -> (List.hd l, List.tl l)
+      | n  ->
+        let (a, q) = pop_nth (List.tl l) (n-1)  in
+        (a, List.hd l :: q)
+    in
+    let len = List.length !moves  in
+    if len = 0 then
+      raise Break
+    else
+      let (a,l) = pop_nth !moves (Random.int len)  in
+      moves := l;
+      a
+  in
+  let coeff _ _ = ()
+  in
+  cells.(0).(0).visited <- true;
+  insert_move ((0,1), Left) 1;
+  insert_move ((1,0), Top) 1;
+  begin try while true do
+    let ((i,j), dir) = pop_move ()  in
+    if not cells.(i).(j).visited then begin
+      cells.(i).(j).visited <- true;
+      begin match dir with
+      | Left    -> cells.(i).(j-1).right <- false
+      | Right   -> cells.(i).(j).right <- false
+      | Top     -> cells.(i-1).(j).bottom <- false
+      | Bottom  -> cells.(i).(j).bottom <- false
+      end;
+      if j > 0 && not cells.(i).(j-1).visited then
+        insert_move ((i,j-1), Right) (coeff dir Right);
+      if i > 0 && not cells.(i-1).(j).visited then
+        insert_move ((i-1,j), Bottom) (coeff dir Bottom);
+      if j < w-1 && not cells.(i).(j+1).visited then
+        insert_move ((i,j+1), Left) (coeff dir Left);
+      if i < h-1  && not cells.(i+1).(j).visited then
+        insert_move ((i+1,j), Top) (coeff dir Top);
+      (*print_maze (w, h, cells);
+      ignore (read_line ())*)
+    end
+  done with Break -> () end;
+  (w, h, cells)
+
+let random_maze2 w h branching_factor crux_factor =
+  Printf.printf "%u×%u: %u, %u / %u\n" w h branching_factor crux_factor (w*h);
+  let cells =
+   Array.init w (fun _ ->
+    Array.init h (fun _ -> cell true true) )  in
+  let q = Queue.create ()  in
+  let push_cell pos = Queue.push pos q
+  and pop_cell () = Queue.pop q  in
+  let get_unvisited () =
+      let rec get_rec i j =
+        if not cells.(i).(j).visited then begin
+          let dir =
+            if j > 0 && cells.(i).(j-1).visited then
+              Left
+            else if i > 0 && cells.(i-1).(j).visited then
+              Top
+            else if j < w-1 && cells.(i).(j+1).visited then
+              Right
+            else (*if i < h-1  && cells.(i+1).(j).visited then*)
+              Bottom
+          in
+          Some ((i,j), dir)
+        end else if j < w-1 then
+          get_rec i (j+1)
+        else if i < h-1 then
+          get_rec (i+1) 0
+        else
+          None
+      in
+      get_rec 0 0
+  in
+  let mark ((i,j), dir) =
+    cells.(i).(j).visited <- true; 
+    begin match dir with
+    | Left    -> cells.(i).(j-1).right <- false
+    | Right   -> cells.(i).(j).right <- false
+    | Top     -> cells.(i-1).(j).bottom <- false
+    | Bottom  -> cells.(i).(j).bottom <- false
+    end;
+    push_cell (i,j)
+  in
+  let rec visit (i,j) =
+    let neighbours = ref [] in
+    let add_neighbour i' j' dir =
+      neighbours := ((i',j'), dir) :: !neighbours
+    in
+    let pop_neighbour nth =
+      let rec pop first last = function
+        | 0  -> (List.hd last, List.rev_append first (List.tl last))
+        | n  -> pop ((List.hd last) :: first) (List.tl last) (n-1)
+      in
+      let (a,l) = pop [] !neighbours nth  in
+      neighbours := l;
+      a
+    in
+    if j > 0 && not cells.(i).(j-1).visited then
+      add_neighbour i (j-1) Right;
+    if i > 0 && not cells.(i-1).(j).visited then
+      add_neighbour (i-1) j Bottom;
+    if j < w-1 && not cells.(i).(j+1).visited then
+      add_neighbour i (j+1) Left;
+    if i < h-1  && not cells.(i+1).(j).visited then
+      add_neighbour (i+1) j Top;
+    let n = List.length !neighbours  in
+    let random_branching = Random.int 1000  in
+    if n = 0 then
+      match get_unvisited () with
+      | None       -> ()
+      | Some move  -> mark move
+    else if n = 1 || random_branching >= branching_factor then
+      mark (pop_neighbour (Random.int n))
+    else if n = 2 || random_branching >= crux_factor then begin
+      mark (pop_neighbour (Random.int n));
+      mark (pop_neighbour (Random.int (n-1)))
+    end else begin
+      mark (pop_neighbour (Random.int 3));
+      mark (pop_neighbour (Random.int 2));
+      mark (pop_neighbour (Random.int 1))
+    end;
+    if not (Queue.is_empty q) then
+      visit (pop_cell ())
+  in
+  cells.(0).(0).visited <- true;
+  visit (0,0);
+  (w, h, cells)
+
+
+
+let _ =
+  Random.self_init ();
+  (*for coeff = 0 to 2 do
+    print_maze (random_maze 16 16 (1000*coeff))
+  done;*)
+  for i = 0 to 4 do
+    let a = 16
+    and (branching, crux) = (4*i, i)  in
+    print_maze (random_maze2 a a branching crux)
+  done;
+  (*print_maze (random_maze2 16 16 30 2)*)
+  for i = 0 to 4 do
+    print_maze (random_maze2 16 16 16 4)
+  done;

@@ -1,0 +1,258 @@
+#!/usr/bin/ocaml
+
+(* Default constants. *)
+
+let (width, height) = (7,6)
+let depth = 4
+
+
+
+(* Small functions for convenience. *)
+
+let fst3 (a,_,_) = a
+let decr_array t i =  t.(i) <- t.(i) - 1
+let incr_array t i =  t.(i) <- t.(i) + 1
+
+
+
+(* The game board. *)
+
+module Board =
+struct
+  type t = {
+    w :int;  h :int;
+    empty   :int ref;
+    heights :int array;
+    grid    :int array array
+  }
+  exception Full
+  exception Out_of_range
+  
+  let create w h =
+    {w = w;  h = h;  empty = ref (w*h);
+     heights = Array.make w h;  grid = Array.make_matrix h w 0}
+  
+  let play_move board j player =
+    if j < 0 || j >= board.w then raise Out_of_range;
+    if board.heights.(j) = 0 then raise Full;
+    decr board.empty;
+    decr_array board.heights j;
+    board.grid.(board.heights.(j)).(j) <- player
+  
+  let cancel_move board j =
+    incr board.empty;
+    board.grid.(board.heights.(j)).(j) <- 0;
+    incr_array board.heights j
+  
+  let print board =
+    for i = 0 to board.h-1 do
+      print_string "   |";
+      for j = 0 to board.w-1 do
+        let c = match board.grid.(i).(j) with
+        | -1 -> '-'
+        | 1  -> '+'
+        | _  -> ' '
+        in
+        print_char c
+      done;
+      print_endline "|"
+    done
+end
+
+
+
+(* Evaluation functions. *)
+
+let count_from_here idir jdir board i j player =
+  let open Board in
+  let pos idir jdir k =
+    (i-idir* k, j-jdir* k)
+  in
+  let is_in_range i j =
+    i >= 0 && j >= 0 && i < board.h && j < board.w
+  in
+  let rec count p idir jdir k =
+    let (i',j') = pos idir jdir k in
+    if is_in_range i' j' && List.mem board.grid.(i').(j') [p;player] then
+      1 + count p idir jdir (k+1)
+    else
+      0
+  in
+  let left = count player idir jdir 1
+  and right = count player ~-idir ~-jdir 1 in
+  let left_empty = count 0 idir jdir (left+1)
+  and right_empty = count 0 idir jdir (right+1) in
+  let boundary = board.heights.(j) = i+1
+      && 
+      (let (i',j') = pos idir jdir (left+1) in
+       is_in_range i' j' && board.heights.(j') = i'+1)
+      &&
+      (let (i',j') = pos ~-idir ~-jdir (right+1) in
+       is_in_range i' j' && board.heights.(j') = i'+1)
+  in
+  let count_owned = left + 1 + right in
+  let count_potential = left_empty + count_owned + right_empty in
+  (count_owned, count_potential, boundary)
+
+let count_horiz = count_from_here 0 (+1)
+let count_verti = count_from_here (+1) 0
+let count_diag1 = count_from_here (+1) (+1)
+let count_diag2 = count_from_here (+1) (-1)
+
+exception Winning_move
+exception Combo_move
+type eval =
+  | Eval_regular of int
+  | Eval_winning_move
+  | Eval_combo_move
+
+let eval board player =
+  let coeff = function
+  | (_,p,_) when p < 4  -> 0
+  | (n,_,_) when n >= 4  -> raise Winning_move
+  | (3,p,true) when p >= 4  -> raise Combo_move
+  | (n,_,b)  -> n*n*100
+  in
+  let open Board in
+  try
+    let score = ref 0 in
+    for j = 0 to board.w-1 do
+      for i = board.heights.(j)-1 downto 0 do
+        score := !score
+         +((coeff (count_horiz board i j player))
+         + (coeff (count_verti board i j player))
+         + (coeff (count_diag1 board i j player))
+         + (coeff (count_diag2 board i j player))
+          )
+      done
+    done;
+    Eval_regular !score
+  with
+  | Winning_move  -> Eval_winning_move
+  | Combo_move    -> Eval_combo_move
+
+let has_a_4_sequency board i j =
+  let open Board in
+  let player = board.grid.(i).(j) in
+  fst3 (count_horiz board i j player) >= 4 ||
+  fst3 (count_verti board i j player) >= 4 ||
+  fst3 (count_diag1 board i j player) >= 4 ||
+  fst3 (count_diag2 board i j player) >= 4
+
+let wins_game board j =
+  let open Board in
+  let i = board.heights.(j) in
+  has_a_4_sequency board i j
+
+let ends_game board j =
+  let open Board in
+  !(board.empty) = 0 || wins_game board j
+
+(*exception Victory_found
+let game_is_ended board =
+  let open Board in
+  !(board.empty) = 0 ||
+  try
+    for j = 0 to board.w-1 do
+      for i = board.heights.(j) to board.h-1 do
+        if board.grid.(i).(j) <> 0 && has_a_4_sequency board i j then
+          raise Victory_found
+      done
+    done;
+    false
+  with Victory_found -> true*)
+
+(*let rec minimax board player depth treshold =
+  let open Board in
+  if depth = 0 || game_is_ended board then
+    (float_of_int (eval board player), -1)
+  else begin
+    let best = ref (-.infinity, -1)  in (* (score, j) *)
+    for j = 0 to board.w-1 do
+      if board.heights.(j) > 0 then begin
+        Board.play_move board j player;
+        let (score, _) = !best in
+        let (score', _) = minimax board ~-player (depth-1) ~-.score in
+        best := max !best (-.score',j);
+        Board.cancel_move board j
+      end
+    done;
+    !best
+  end*)
+exception Killer_move of int
+let rec minimax board player depth treshold =
+  let open Board in
+  if depth = 0 || (*game_is_ended board*) !(board.empty) = 0 then
+    (*let score = (eval board player) + 50 - (eval board ~-player) in
+    let score' = score + !(board.empty) in*)
+    let score =
+    match ((eval board player), (eval board ~-player)) with
+    | (Eval_winning_move, _)  ->  100_000
+    | (_, Eval_winning_move)  -> -100_000
+    | (Eval_combo_move, _)    ->   50_000
+    | (_, Eval_combo_move)    ->  -50_000
+    | (Eval_regular pros, Eval_regular cons)
+     -> pros + 50 - cons in
+    let score' = score + !(board.empty) in
+    (float_of_int score', -1)
+  else begin
+    try
+      let best = ref (-.infinity, -1)  in (* (score, j) *)
+      begin try
+      for j = 0 to board.w-1 do
+        if board.heights.(j) > 0 then begin
+          Board.play_move board j player;
+          if wins_game board j then raise (Killer_move j);
+          let (score, _) = !best in
+          let (score', _) = minimax board ~-player (depth-1) ~-.score in
+          best := max !best (-.score',j);
+          Board.cancel_move board j;
+          if fst !best >= treshold then failwith "cutoff"
+        end
+      done
+      with Failure "cutoff" -> () end;
+      !best
+    with
+    | Killer_move j ->
+      Board.cancel_move board j;
+      (infinity+. (float_of_int !(board.empty)), j)
+  end
+
+
+
+(* Interface. *)
+
+let ask_move_ia board player =
+  let (score,j) = minimax board player depth infinity  in begin
+    Printf.printf "%u  [%.0f]\n" j score;
+    j
+  end
+
+let ask_move_human board player =
+  Scanf.scanf " %i" (fun j -> j)
+
+let play ask_1 ask_2 =
+  let board = Board.create width height in
+  let player = ref 1 in
+  let again = ref true in
+  while !again do
+    Board.print board;
+    Printf.printf "joueur %+i : %!" !player;
+    let j = [|ask_1;ask_2|].((1- !player)/2) board !player in
+    try
+      Board.play_move board j !player;
+      player := - !player;
+      again := not (ends_game board j)
+    with
+    | Board.Out_of_range -> Printf.printf "  → Position invalide.\n"
+    | Board.Full         -> Printf.printf "  → La colonne %i est pleine.\n" j
+  done;
+  Board.print board;
+  - !player
+;;
+
+
+
+(* Main program. *)
+
+Printf.printf "Joueur %+i gagne !\n" (play ask_move_human ask_move_ia)

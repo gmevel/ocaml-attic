@@ -1,0 +1,114 @@
+#!/usr/bin/ocaml
+
+let count_empty pos =
+  let count = ref 0  in
+  for i = 0 to 8 do
+    if pos.(i/3).(i mod 3) = 0 then
+      incr count
+  done;
+  !count
+;;
+
+let eval pos player =
+  let score = ref 0  in
+  for i = 0 to 2 do
+    if pos.(i).(0) = pos.(i).(1) && pos.(i).(0) = pos.(i).(2) then
+      score := !score + 100 * pos.(i).(0);
+    if pos.(0).(i) = pos.(1).(i) && pos.(0).(i) = pos.(2).(i) then
+      score := !score + 100 * pos.(0).(i)
+  done;
+  if pos.(0).(0) = pos.(1).(1) && pos.(0).(0) = pos.(2).(2) then
+    score := !score + 100 * pos.(0).(0);
+  if pos.(0).(2) = pos.(1).(1) && pos.(0).(0) = pos.(2).(0) then
+    score := !score + 100 * pos.(0).(2);
+  !score * player
+;;
+
+let wins_game pos i j =
+  pos.(i).(j) <> 0 && (
+    let (i1,i2,j1,j2) = ((i+1) mod 3, (i+2) mod 3, (j+1) mod 3, (j+2) mod 3)  in
+       pos.(i).(j) = pos.(i).(j1) && pos.(i).(j) = pos.(i).(j2)
+    || pos.(i).(j) = pos.(i1).(j) && pos.(i).(j) = pos.(i2).(j)
+    || i = j   && pos.(i).(j) = pos.(i1).(j1) && pos.(i).(j) = pos.(i2).(j2)
+    || i = 2-j && pos.(i).(j) = pos.(i2).(j1) && pos.(i).(j) = pos.(i1).(j2)
+  )
+;;
+
+let ends_game pos i j =
+  wins_game pos i j || count_empty pos = 0
+;;
+
+let game_is_ended pos =
+    count_empty pos = 0 || wins_game pos 0 0 || wins_game pos 1 1
+    || wins_game pos 2 2
+;;
+
+let rec minimax pos player depth treshold =
+  if depth = 0 || game_is_ended pos then
+    (float_of_int (eval pos player),-1,-1)
+  else begin
+    let best = ref (-.infinity,-1,-1)  in (* score, i, j *)
+    for i = 0 to 2 do
+      for j = 0 to 2 do
+        if pos.(i).(j) = 0 then begin
+          pos.(i).(j) <- player;
+          let (score,_,_) = !best  in
+          let (score',_,_) = minimax pos ~-player (depth-1) ~-.score  in
+          best := max !best (-.score',i,j);
+          pos.(i).(j) <- 0
+        end
+      done
+    done;
+    !best
+  end
+;;
+
+
+
+let print_board pos =
+  for i = 0 to 2 do
+    print_string "   |";
+    for j = 0 to 2 do
+      print_char (match pos.(i).(j) with -1 -> '-' | 1 -> '+' | _ -> ' ')
+    done;
+    print_endline "|"
+  done
+;;
+
+let ask_move_ia pos player =
+  let (score,i,j) = minimax pos player 9 ~-.infinity  in begin
+    Printf.printf "(%u,%u)  [%.0f]\n" i j score;
+    (i,j)
+  end
+;;
+
+let ask_move_human pos player =
+  Scanf.scanf " %i %i" (fun i j -> i,j)
+;;
+
+let play ask_1 ask_2 =
+  (*let pos = (Array.make 3 (Array.make 3 0))  in*)
+  let pos = [| [|0;0;0|]; [|0;0;0|]; [|0;0;0|] |]  in
+  let player = ref 1  in
+  let again = ref true  in
+  while !again do
+    print_board pos;
+    Printf.printf "joueur %+i : %!" !player;
+    let (i,j) = [|ask_1;ask_2|].((1- !player)/2) pos !player  in
+    begin
+      try
+        if pos.(i).(j) <> 0 then
+          failwith "";
+        pos.(i).(j) <- !player;
+        player := - !player;
+        again := not (ends_game pos i j)
+      with
+      | Invalid_argument _ -> Printf.printf "  → Position invalide, recommencez.\n"
+      | Failure _          -> Printf.printf "  → Case occupée par %+i.\n" pos.(i).(j)
+    end
+  done;
+  print_board pos;
+  !player
+;;
+
+Printf.printf "Joueur %+i gagne !\n" (play ask_move_human ask_move_ia);;
