@@ -59,6 +59,9 @@ let[@inline] ( ~< ) caller ~(f : _ -> _) s ~init = caller f s init (* fold_right
 module Option :
 sig
   include module type of Option
+  val get' : 'a option -> compute_default:(unit -> 'a) -> 'a
+  val fold' : compute_none:(unit -> 'b) -> some:('a -> 'b) -> 'a option -> 'b
+  val to_result' : compute_none:(unit -> 'e) -> 'a option -> ('a, 'e) result
   val app : default:'b -> f:('a -> 'b) -> 'a option -> 'b
   val odo : ('a -> unit) -> 'a option -> unit
   module Infix :
@@ -70,9 +73,22 @@ sig
 end =
 struct
   include Option
-  let app ~default ~f = function
-    | Some x -> f x
-    | None   -> default
+  let get' o ~compute_default =
+    begin match o with
+    | Some x -> x
+    | None   -> compute_default ()
+    end
+  let fold' ~compute_none ~some o =
+    begin match o with
+    | Some x -> some x
+    | None   -> compute_none ()
+    end
+  let to_result' ~compute_none o =
+    begin match o with
+    | Some x -> Ok x
+    | None   -> Error (compute_none ())
+    end
+  let app ~default ~f = fold ~none:default ~some:f
   let odo = iter
   module Infix = struct
     let ( or  ) o d = value ~default:d o
