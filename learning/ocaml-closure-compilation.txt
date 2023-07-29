@@ -1,0 +1,263 @@
+compilation des clôtures en OCaml
+  https://gcc.godbolt.org/
+
+--------------------------------------------------------------------------------
+
+```
+    let[@inline never] hif clo =
+        print_int (clo 1000)
+
+    let[@inline never] fbin_tuple (x, y) =
+        x + y
+
+    let[@inline never] fbin_curry x y =
+        x + y
+
+    let[@inline never] ftri_curry x y z =
+        x + y + z
+
+    let[@inline never] fqua_curry x y z t =
+        x + y + z + t
+
+    let () =
+        print_int (fbin_tuple (111, 222)) ;
+        hif (fbin_curry 100)
+```
+
+OCaml 4.12 64-bit sans flambda:
+
+  blocs statiques:
+
+    [NOTE: les blocs statiques n’ont pas toujours (jamais?) d’en-tête; un
+    en-tête de bloc (seulement alloué?) est donc considéré comme le champ −1]
+
+    interface du module:
+    - adresse bloc clôture de hif
+    - adresse bloc clôture de fbin_tuple
+    - adresse bloc clôture de fbin_curry
+    - adresse bloc clôture de ftri_curry
+    - adresse bloc clôture de fqua_curry
+
+    clôture de hif = fonction 1-aire:
+    - adresse code de hif
+    - 0x100000000000005 (0x5 = 0b0101)
+
+    clôture de fbin_tuple = fonction 2-aire tuplifiée:
+    - caml_tuplify2
+    - 0x200000000000007 (0x7 = 0b0111)
+    - arg1 = adresse code currifié de fbin_tuple
+
+    clôture de fbin_curry = fonction 2-aire currifiée:
+    - caml_curry2
+    - 0x200000000000007
+    - arg1 = adresse code de fbin_curry
+
+    clôture de ftri_curry = fonction 3-aire currifiée:
+    - caml_curry3
+    - 0x300000000000007
+    - arg1 = adresse code de ftri_curry
+
+    clôture de fqua_curry = fonction 4-aire currifiée:
+    - caml_curry4
+    - 0x400000000000007
+    - arg1 = adresse code de ftri_curry
+
+    tuple (111, 222):
+    - 2×111 + 1
+    - 2×222 + 1
+
+  blocs alloués:
+
+    clôture de (fbin_curry 100):
+    - −1: en-tête bloc = 0x10F7
+          (0xF7 = clôture, 0x10 = 4<<2 avec 4 la taille du bloc sans l’en-tête?
+          et les 2 bits restants sont ceux utilisés par le GC?)
+    -  0: adresse code lambda lifté
+          (dépaquète la clôture et appelle fbin_curry)
+    -  1: 0x100000000000005
+    -  2: arg1 = 2×100 + 1
+    -  3: arg2 = adresse clôture de fbin_curry
+
+avec flambda:
+
+  la constante 100 est inlinée dans le code de la clôture (fbin_curry 100),
+  en particulier elle n’est plus incluse dans l’environnement de la clôture;
+  la clôture de (fbin_curry 100) est maintenant allouée statiquement:
+
+    clôture de (fbin_curry 100) = fonction 1-aire:
+    - adresse code lambda lifté
+    - 0x100000000000005
+
+  caml_tuplify2 est remplacé par un code wrapper spécialisé pour fbin_tuple;
+  l’appel direct à la fonction fbin_tuple court-circuite ce wrapper et
+  l’allocation de tuple pour appeler directement le code currifié de fbin_tuple;
+  la clôture de fbin_tuple est remplacée par ces deux-là:
+
+    clôture de fbin_tuple = fonction 2-aire tuplifiée:
+    - adresse code wrapper tuplifié
+      (dépaquète le tuple et appelle le code currifié de fbin_tuple)
+    - 0x10000000000000D (0xD = 0b1101, peut-être le bit 1___ signifie "tuplifié"?)
+    - 3321 = ???
+
+    clôture currifiée de fbin_tuple = fonction 2-aire currifiée:
+    - caml_curry2
+    - 0x200000000000007
+    - adresse code currifié de fbin_tuple
+
+fonctionnement du code:
+
+  appel résoluble statiquement:
+      compilé en appel direct (ouf)
+  appel inconnu:
+    - met les arguments dans %rax, %rbx, %rdi, %rsi, etc.
+      la clôture elle-même est passée en dernier argument
+    - appelle le code dont l’adresse se trouve dans le champ 0 de la clôture
+
+  conjecture:
+
+    caml_curryN:
+      - travaille pour un N fixé
+      - est appelé avec Q ≤ N arguments et une clôture dont la fonction de base,
+        celle qu’il faut appeler, est N-aire
+      - lit le champ 1 de la clôture; la valeur 0x100...005 ou 0xQ00...007
+        lui indique Q
+      - fait des Q arguments qu’on lui a donnés les derniers arguments de la
+        fonction à appeler
+      - lit les N−Q champs suivants de la clôture (environnement de la clôture)
+        et en fait les premiers arguments de la fonction à appeler
+      - appelle le code dont l’adresse se trouve dans le dernier champ de la
+        clôture
+    caml_tuplifyN:
+        fonctionne pareil, sauf qu’en entrée elle reçoit un argument Q-uplet
+        à dépaqueter, au lieu de Q arguments simples
+    code lambda-lifté:
+        une version spécialisée de caml_tuplifyN, qui n’a pas besoin de lire la
+        clôture pour connaître le nombre d’arguments restants ni l’adresse du
+        code à appeler (connu statiquement)
+
+    NON! ne pourrait pas compiler les applications partielles de fonctions
+    inconnues… plutôt ça:
+    quand l’arité du code à appeler n’est pas connue statiquement (par exemple
+    à travers une frontière de module), on est obligé de lui passer les
+    arguments 1 par 1 et le code appelé alloue des clôtures intermédiaires;
+    donc la clôture exposée par le module utilise comme code une fonction
+    caml_curryN, où N ≥ 1 est l’arité de la fonction de base.
+
+    caml_curryN:
+      - travaille pour un N ≥ 1 fixé
+      - est appelé avec 1 argument y et une clôture Closure (_, K, f, x1, …, xP)
+        contenant P champs d’environnement x1, …, xP (0 ≤ P < N) et une
+        fonction de base N-aire f
+      - lit le champ 1 de la clôture (K); la valeur 0x100..005 ou 0xQ00...007
+        lui indique Q = N−P (nombre d’arguments restant à fournir) et P (nombre
+        d’arguments déjà fournis, emmagasinés dans la clôture)
+      - selon les cas:
+        + si Q = 1: appelle (f x1 … xP y)
+        + si Q = 2: alloue une nouvelle clôture
+          Closure (caml_curryN, 0x100...005, f, x1, …, xP, y)
+        + si Q ≥ 3: alloue une nouvelle clôture
+          Closure (caml_curryN, 0x{Q−1}00...007, f, x1, …, xP, y)
+    optimisation de la clôture quand P = 0 et Q = 1 connu statiquement:
+        i.e. fonction de base 1-aire (p.ex. `hif`);
+        on peut court-circuiter caml_curry1, la clôture générée est simplement
+        Closure (f, 0x100..005)
+    optimisation de la clôture quand Q = 1 connu statiquement (on connaît
+    l’adresse et l’arité de la fonction de base):
+        p.ex. appli (N−1)-partielle d’une fonction N-aire connue statiquement
+        (p.ex. `(fbin_curry 100)`);
+        on peut générer une version spécialisée de caml_curryN qui connaît M et
+        l’adresse du code à appeler sans devoir le lire dans la clôture;
+        la clôture générée est donc Closure (fwrapper, 0x100...050, x1, …, xM)
+
+    peut-être mieux que ça? il existe caml_applyN pour N ≥ 2
+
+    traduction:
+
+      une clôture est de la forme Closure [|f, Q, u1, …, uP|] avec
+        - f un pointeur de code, d’arité 2
+          (attend une valeur x et l’adresse de la clôture elle-même)
+        - Q ≥ 1 le nombre d’arguments manquants
+        - u1, …, uP les arguments déjà accumulés (0 ≤ P < N)
+
+      caml_curryN x (Closure [|caml_curryN, Q, f, u1, …, uP|])  :=
+        if Q = 1 :  f u1 … uP x clo
+        if Q ≥ 2 :  Closure [|caml_curryN, Q−1, f, u1, …, uP, x|]
+      où N est fixé, Q est lu dans la clôture et P = N−Q est déduit
+
+      dans le langage cible, toutes les applications sont totales; la fonction
+      appliquée est soit connue statiquement, soit une clôture; je note (!clo x)
+      pour l’application d’une clôture, en fait c’est (let f = clo.(0) in clo
+      x clo).
+
+      fonction N-aire connue statiquement:
+        f                  -->  Closure [|f, 1|]  si N = 1
+        f x1 … xM          -->  Closure [|caml_curryN, N−M, f, x1, …, xM|]  si M < N
+        f x1 … xN          -->  f x1 … xN
+        f x1 … xN y1       -->  !(f x1 … xN) y1
+        f x1 … xN y1 … yM  -->  caml_applyM y1 … yM (f x1 … xM)
+
+      fonction inconnue:
+        f x1       -->  !f x1
+        f x1 … xM  -->  caml_applyM x1 … xM f
+
+      QUESTION: caml_applyM est-elle triviale (applique les arguments 1 à 1):
+        caml_applyM x1 … xM clo  :=  !(…(!(!clo x1) x2) …) xM
+      ou alors est-elle optimisée?
+        caml_applyM x1 … xM clo  :=
+          match clo with
+          | Closure [|caml_curryN, Q, f, u1, …, uP|] for some N ->
+              (* we deduce P = N−Q *)
+              if M < Q :    Closure [|caml_curryN, Q−M, f, u1, …, uP, x1, …, xM|]
+              if M = Q :    f u1 … uP x1 … xM
+              if M = Q+1 :  !(f u1 … uP x1 … xQ) xM
+              if M > Q :    caml_apply{M−Q} x{Q+1} … xM (f u1 … uP x1 … xQ)
+          | Closure [|f, Q, u1|] ->
+      pour ça elle aurait besoin de connaître la taille de la clôture (nombre
+      d’arguments déjà accumulés) et avec les infos disponibles (les blocs n’ont
+      pas toujours d’en-tête) ça n’a pas l’air possible… à moins de comparer le
+      pointeur de code de la clôture à caml_curryN et de supposer que N =1 quand
+      le pointeur n’est égal à aucun des caml_curryN (invariant qu’il faudrait
+      maintenir), ce qui semble périlleux…
+
+--------------------------------------------------------------------------------
+
+```
+    let[@inline never] id x = x
+
+    let[@inline never] fbin x y =
+        x + y
+
+    let[@inline never] ftri x y z =
+        x + y + z
+
+    let[@inline never] fqua x y z t =
+        x + y + z + t
+
+    let () =
+        print_int (id id 111) ;
+        print_int (id fbin 222 2222) ;
+        print_int (id ftri 333 3333 33333) ;
+        print_int (id fqua 444 4444 44444 444444)
+```
+
+```
+    let[@inline never] id x = x
+
+    let[@inline never] f x y =
+        let z = x + y in
+        (fun () -> z)
+
+    let[@inline never] g x y =
+        let z1 = x + y in
+        let z2 = x - y in
+        (fun () -> z1 * z2)
+
+    let[@inline never] g2 x y =
+        let z1 = x + y in
+        let z2 = x - y in
+        (fun () () -> z1 * z2)
+
+    let () =
+        print_int (f 111 222 ()) ;
+        print_int (g 333 444 ())
+```
