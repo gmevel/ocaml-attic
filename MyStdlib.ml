@@ -1,3 +1,5 @@
+(* last update: 2023-07-30 (OCaml 5.0) *)
+
 (*
  * Some of the functions below are ones for which I felt the need several times
  * in practice and which IMHO are missing from the Stdlib. This includes mere
@@ -84,7 +86,12 @@ sig
   include module type of Option
   (* ! *)
   (* [get', fold', to_result'] are variants of [get, fold, to_result] where the
-   * default value is computed only if needed (TODO: find better naming): *)
+   * default value is computed only if needed.
+   * TODO: find better naming.
+   * Other people are interested in this function as well:
+   * https://discuss.ocaml.org/t/option-fold-with-init-taking-a-thunk/11497
+   * The Containers library has similar functions named [*_lazy] (but IMHO these
+   * names are not great, because there is no proper lazy values). *)
   val get' : 'a option -> compute_default:(unit -> 'a) -> 'a (* !! *)
   val fold' : compute_none:(unit -> 'b) -> some:('a -> 'b) -> 'a option -> 'b
   val to_result' : compute_none:(unit -> 'e) -> 'a option -> ('a, 'e) result
@@ -823,7 +830,8 @@ struct
   let pop : 'k 'v. ('k, 'v) t -> 'k -> 'v =
     fun ht k -> match pop_opt ht k with Some v -> v | None -> raise Not_found
 
-  (* ? *)
+  (* !! *)
+  (* TODO: better naming *)
   let get_or_set' : 'k 'v. ('k, 'v) t -> 'k -> default:(unit -> 'v) -> 'v =
     (* FIXME: an internal implementation would be more efficient (only one hash
      * computation and one traversal of the data structure) *)
@@ -833,8 +841,7 @@ struct
       | Some v -> v
       end
 
-  (* !! *)
-  (* TODO: better naming *)
+  (* ? *)
   let get_or_set : 'k 'v. ('k, 'v) t -> 'k -> default:'v -> 'v =
     fun ht k ~default -> get_or_set' ht k ~default:(fun () -> default)
 
