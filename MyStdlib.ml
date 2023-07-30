@@ -1,7 +1,20 @@
+(*
+ * Some of the functions below are ones for which I felt the need several times
+ * in practice and which IMHO are missing from the Stdlib. This includes mere
+ * aliases to existing functions, because I struggled with their name (often
+ * because of inconsistencies between modules).
+ *
+ * These functions are signaled with (* ! *) where the number of "!" increases
+ * with the urge.
+ *
+ * Some other functions are there for consistency, even though I may not have
+ * needed them several times yet. These are signaled with (* ? *).
+ *)
+
 (******************************************************************************)
 
 (**
- ** Higher-order
+ **  Higher-order
  **)
 
 (* nice: function composition, backward and forward
@@ -20,7 +33,7 @@
  * is equivalent to [x |> f |> g] parsed as [(x |> f) |> g]
  * but typechecking is done in a different order
  *)
-let[@inline] ( %  ) g f x = g @@ f @@ x
+let[@inline] ( %  ) g f x = g @@ f @@ x (* !! *)
 let[@inline] ( %> ) f g x = x |> f |> g
 
 (* life-changing: naming as `~f` the 1st/2nd/3rd parameter of a higher-order
@@ -50,6 +63,16 @@ let[@inline] ( ~~~~ ) caller x y ~(f : _ -> _) = caller x y f
 let[@inline] ( ~> ) caller ~(f : _ -> _) ~init s = caller f init s (* fold_left *)
 let[@inline] ( ~< ) caller ~(f : _ -> _) s ~init = caller f s init (* fold_right *)
 
+module Fun :
+sig
+  include module type of Fun
+  val compose : ('b -> 'c) -> ('a -> 'b) -> ('a -> 'c) (* ! *)
+end =
+struct
+  include Fun
+  let compose = (%)
+end (* module Fun *)
+
 (******************************************************************************)
 
 (**
@@ -59,11 +82,14 @@ let[@inline] ( ~< ) caller ~(f : _ -> _) s ~init = caller f s init (* fold_right
 module Option :
 sig
   include module type of Option
-  val get' : 'a option -> compute_default:(unit -> 'a) -> 'a
+  (* ! *)
+  (* [get', fold', to_result'] are variants of [get, fold, to_result] where the
+   * default value is computed only if needed (TODO: find better naming): *)
+  val get' : 'a option -> compute_default:(unit -> 'a) -> 'a (* !! *)
   val fold' : compute_none:(unit -> 'b) -> some:('a -> 'b) -> 'a option -> 'b
   val to_result' : compute_none:(unit -> 'e) -> 'a option -> ('a, 'e) result
+  (* it took me a while to realize that [app] is the same as [fold]: *)
   val app : default:'b -> f:('a -> 'b) -> 'a option -> 'b
-  val odo : ('a -> unit) -> 'a option -> unit
   module Infix :
   sig
     val ( or  ) : 'a option -> 'a -> 'a
@@ -89,7 +115,6 @@ struct
     | None   -> Error (compute_none ())
     end
   let app ~default ~f = fold ~none:default ~some:f
-  let odo = iter
   module Infix = struct
     let ( or  ) o d = value ~default:d o
     let ( >>= ) o f = bind o f
@@ -134,43 +159,213 @@ end
 
 (******************************************************************************)
 
-(*
- *  Arrays
- *)
+(**
+ **  Sequences
+ **)
+
+module Seq =
+struct
+
+  include Seq
+
+  (* ? *)
+  (* alias [combine] to [zip] for consistency with module [List], and since
+   * there already is [Seq.split] (however, beware that [List.combine] fails
+   * when the lengths differ, whereas [Seq.zip] stops at the shortest length): *)
+  let combine = zip
+
+  (* ? *)
+  module type TODO = sig
+    (* It would make sense to throw all these variants in a submodule named
+     * [Seq.Indexed]; this would also spare use the question of how to name them
+     * (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that already
+     * exist as of OCaml 5.0. *)
+    (*! val iteri : (int -> 'a -> unit) -> 'a t -> unit !*)
+    (*! val fold_lefti : ('b -> int -> 'a -> 'b) -> 'b -> 'a t -> 'b !*)
+    val for_alli : (int -> 'a -> bool) -> 'a t -> bool
+    val existsi : (int -> 'a -> bool) -> 'a t -> bool
+    val findi : (int -> 'a -> bool) -> 'a t -> 'a option
+    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option
+    val iter2i : (int -> 'a -> 'b -> unit) -> 'a t -> 'b t -> unit
+    val fold_left2i : ('a -> int -> 'b -> 'c -> 'a) -> 'a -> 'b t -> 'c t -> 'a
+    val for_all2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
+    val unfoldi : ('b -> int -> ('a * 'b) option) -> 'b -> 'a t
+    val iteratei : (int -> 'a -> 'a) -> 'a -> 'a t
+    val existsi : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
+    (*! val mapi : (int -> 'a -> 'b) -> 'a t -> 'b t !*)
+    val filteri : (int -> 'a -> bool) -> 'a t -> 'a t
+    val filter_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b t
+    val scani : (int -> 'b -> 'a -> 'b) -> 'b -> 'a t -> 'b t
+    val groupi : (int -> 'a -> 'a -> bool) -> 'a t -> 'a t t
+    val flat_mapi : (int -> 'a -> 'b t) -> 'a t -> 'b t
+    val concat_mapi : (int -> 'a -> 'b t) -> 'a t -> 'b t
+    val map2i : (int -> 'a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+    val map_producti : (int -> 'a -> int -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+    val partitioni : (int -> 'a -> bool) -> 'a t -> 'a t * 'a t
+    val partition_mapi : (int -> 'a -> ('b, 'c) Either.t) -> 'a t -> 'b t * 'c t
+  end
+
+  (* ? *)
+  let take_whilei : 'a. (int -> 'a -> bool) -> 'a t -> 'a t =
+    let rec take_whilei_aux cond i s () =
+      begin match s () with
+      | Cons (x, s') when cond i x -> Cons (x, take_whilei_aux cond (i+1) s')
+      | node                       -> Nil
+      end
+    in
+    fun cond s () -> take_whilei_aux cond 0 s ()
+
+  (* ? *)
+  let drop_whilei : 'a. (int -> 'a -> bool) -> 'a t -> 'a t =
+    let rec drop_whilei_aux cond i s () =
+      begin match s () with
+      | Cons (x, s') when cond i x -> drop_whilei_aux cond (i+1) s' ()
+      | node                       -> node
+      end
+    in
+    fun cond s () -> drop_whilei_aux cond 0 s ()
+
+  (* ! *)
+  (* interruptible version of [fold_left]
+   * TODO: the same for [iter], [find], [exists], etc.*)
+  let fold_left_whilei : 'a 'b 'c.
+    ('b -> int -> 'a -> ('c, 'b) Either.t) ->
+    'b -> 'a t -> ('c * 'a t, 'b) Either.t =
+    let rec aux f a i s =
+      begin match s () with
+      | Cons (x, s') ->
+          begin match f a i x with
+          | Either.Left z  -> Either.Left (z, s')
+          | Either.Right y -> aux f y (i+1) s'
+          end
+      | Nil -> Either.Right a
+      end
+    in
+    fun f a s -> aux f a 0 s
+
+  (* ! *)
+  let fold_left_while : 'a 'b 'c.
+    ('b -> 'a -> ('c, 'b) Either.t) ->
+    'b -> 'a t -> ('c * 'a t, 'b) Either.t =
+    fun f a s -> fold_left_whilei (fun a i x -> f a x) a s
+
+  (* BUG REPORT: doc: document that the order in [Seq.product] is compatible
+   * with the pointwise order *)
+
+end (* module Sval mapi : (int -> 'a -> 'b) -> 'a t -> 'b teq *)
+
+
+(******************************************************************************)
+
+(**
+ **  Arrays
+ **)
 
 module Array =
 struct
 
   include Array
 
-  (* Example use: assuming that [a] is sorted w.r.t [compare], then
-   * [Array.find_idx_sorted (compare x) a] returns [Ok i] if the element [x] is
-   * present in [a] at index [i], or [Error i] if it is not present and [i] the
-   * index where inserting [x] would preserve the order. *)
-  let find_idx_sorted : 'a. ('a -> int) -> 'a array -> (int, int) result =
-    let rec find_idx_sorted f ar i j =
-      assert (0 <= i && i <= j && j <= Array.length ar) ;
-      if i < j then begin
-        let k = ((j-i) lsr 1) + i in (* this is (i+j)/2 but avoids overflows *)
-        let r = f ar.(k) in
-        if r = 0 then Ok k
-        else if r < 0 then
-          find_idx_sorted f ar i k
-        else
-          find_idx_sorted f ar (k+1) j
-      end
-      else Error i
-    in
-    fun f ar -> find_idx_sorted f ar 0 (Array.length ar)
+  (* ? *)
+  (* IMHO [zip/unzip] are better names than [combine/split], and they are also
+   * consistent with module [Seq] and with Haskell (however, beware that
+   * [Array.combine] fails when the lengths differ, whereas [Seq.zip] stops at
+   * the shortest length): *)
+  let zip = combine
+  let unzip = split
 
-  let find_idx : 'a. ('a -> bool) -> 'a array -> int =
-    let rec find_idx f ar i n =
+  (* ? *)
+  module type TODO = sig
+    (* It would make sense to throw all these variants in a submodule named
+     * [Array.Indexed]; this would also spare use the question of how to name
+     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
+     * already exist as of OCaml 5.0. *)
+    (*! val iteri : (int -> 'a -> unit) -> 'a t -> unit !*)
+    (*! val mapi : (int -> 'a -> 'b) -> 'a t -> 'b t !*)
+    val fold_lefti : ('a -> int -> 'b -> 'a) -> 'a -> 'b t -> 'a (* !! *)
+    val fold_left_mapi : (int -> 'a -> 'b -> 'a * 'c) -> 'a -> 'b t -> 'a * 'c t
+    val fold_righti : (int -> 'b -> 'a -> 'a) -> 'b t -> 'a -> 'a
+    val iter2i : (int -> 'a -> 'b -> unit) -> 'a t -> 'b t -> unit (* ! *)
+    val map2i : (int -> 'a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+    val for_alli : (int -> 'a -> bool) -> 'a t -> bool
+    val existsi : (int -> 'a -> bool) -> 'a t -> bool
+    val for_all2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
+    val exists2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
+    val findi_opt : (int -> 'a -> bool) -> 'a t -> 'a option (* ! *) (* done *)
+    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* done *)
+  end
+
+  (* !! *)
+  let init_matrix : 'a. int -> int -> (int -> int -> 'a) -> 'a array array =
+    fun m n f ->
+      Array.init m (fun i -> Array.init n (fun j -> f i j))
+
+  (* ? *)
+  let find : 'a. ('a -> bool) -> 'a array -> 'a =
+    fun f ar ->
+      begin match Array.find_opt f ar with
+      | Some x -> x
+      | None   -> raise Not_found
+      end
+
+  (* ? *)
+  let find_mapi : 'a 'b. (int -> 'a -> 'b option) -> 'a array -> 'b option =
+    let rec find_mapi f ar i n =
       if i < n then
-        if f ar.(i) then i
-        else find_idx f ar (i+1) n
+        let o = f i ar.(i) in
+        if o <> None then o
+        else find_mapi f ar (i+1) n
+      else None
+    in
+    fun f ar -> find_mapi f ar 0 (Array.length ar)
+
+  (* ? *)
+  let findi_idx : 'a. (int -> 'a -> bool) -> 'a array -> int =
+    (*! fun f ar -> find_mapi_exn (fun i x -> if f i x then Some i else None) ar !*)
+    let rec findi_idx f ar i n =
+      if i < n then
+        if f i ar.(i) then i
+        else findi_idx f ar (i+1) n
       else raise Not_found
     in
-    fun f ar -> find_idx f ar 0 (Array.length ar)
+    fun f ar -> findi_idx f ar 0 (Array.length ar)
+
+  (* !! *)
+  let findi_idx_opt : 'a. (int -> 'a -> bool) -> 'a array -> int option =
+    (*! fun f ar -> find_mapi (fun i x -> if f i x then Some i else None) ar !*)
+    fun f ar -> try Some (findi_idx f ar) with Not_found -> None
+
+  (* ? *)
+  let findi : 'a. (int -> 'a -> bool) -> 'a array -> 'a =
+    fun f ar -> ar.(findi_idx f ar)
+
+  (* ! *)
+  let findi_opt : 'a. (int -> 'a -> bool) -> 'a array -> 'a option =
+    fun f ar -> try Some (findi f ar) with Not_found -> None
+
+  (* ? *)
+  let find_idx : 'a. ('a -> bool) -> 'a array -> int =
+    fun f ar -> findi_idx (fun _i x -> f x) ar
+
+  (* ! *)
+  let find_idx_opt : 'a. ('a -> bool) -> 'a array -> int option =
+    fun f ar -> try Some (find_idx f ar) with Not_found -> None
+
+  (* ? *)
+  let mem_idx : 'a. 'a -> 'a array -> int =
+    fun x ar -> find_idx ((=) x) ar
+
+  (* !! *)
+  let mem_idx_opt : 'a. 'a -> 'a array -> int option =
+    fun x ar -> find_idx_opt ((=) x) ar
+
+  (* ? *)
+  let memq_idx : 'a. 'a -> 'a array -> int =
+    fun x ar -> find_idx ((==) x) ar
+
+  (* ? *)
+  let memq_idx_opt : 'a. 'a -> 'a array -> int option =
+    fun x ar -> find_idx_opt ((==) x) ar
 
   (*
   let find_all_idx : 'a. ('a -> bool) -> 'a array -> int list =
@@ -192,6 +387,50 @@ struct
     in
     fun f ar -> find_all_idx f ar 0 (Array.length ar)
 
+  (* Example use: assuming that [a] is sorted w.r.t [compare], then
+   * [Array.find_idx_sorted (compare x) a] returns [Ok i] if the element [x] is
+   * present in [a] at index [i], or [Error i] if it is not present and [i] is
+   * the index where inserting [x] would preserve the order.
+   *
+   * More generally, [find_idx_sorted pred ar] assumes that the sign of the
+   * predicate [pred] is weakly decreasing over successive elements of the array
+   * [ar]. In other words, the array is divided into 3 chunks, which may all be
+   * empty:
+   *
+   *   - first there are k1 ≥ 0 elements for which [pred] is positive,
+   *   - then there are k2 ≥ 0 elements for which [pred] is null,
+   *   - last there are k3 ≥ 0 elements for which [pred] is negative;
+   *
+   * Then:
+   *
+   *   - if k2 = 0, the function returns [Error k1]
+   *     (this is the index where the predicate flips from positive to negative,
+   *     thus where to insert an element which would make the predicate null);
+   *   - if k2 = 1, the function returns [Ok k1]
+   *     (this is the index where the predicate is null);
+   *   - if k2 ≥ 1, the function returns [Ok i] for some k1 ≤ [i] < k1+k2
+   *     (this is the range of indexes where the predicate is null);
+   *     it is not specified which [i] is returned.
+   *
+   * Note that, when the predicate is positive for all elements of the array,
+   * the function returns [Error (Array.length ar)].
+   *)
+  let find_idx_sorted : 'a. ('a -> int) -> 'a array -> (int, int) result =
+    let rec find_idx_sorted f ar i j =
+      assert (0 <= i && i <= j && j <= Array.length ar) ;
+      if i < j then begin
+        let k = ((j-i) lsr 1) + i in (* this is (i+j)/2 but avoids overflows *)
+        let r = f ar.(k) in
+        if r = 0 then Ok k
+        else if r < 0 then
+          find_idx_sorted f ar i k
+        else
+          find_idx_sorted f ar (k+1) j
+      end
+      else Error i
+    in
+    fun f ar -> find_idx_sorted f ar 0 (Array.length ar)
+
   let shuffle : 'a. 'a array -> unit =
     fun ar ->
       for i = Array.length ar - 1 downto 1 do
@@ -200,6 +439,21 @@ struct
         ar.(i) <- ar.(j) ;
         ar.(j) <- x ;
       done
+
+  (* ! *)
+  (* Note that there exists [Hashtbl.filter_map_inplace] *)
+  (* NOTE: A very unsafe version of this function may allow changing the type of
+   * the array elements. *)
+  let mapi_inplace : 'a. (int -> 'a -> 'a) -> 'a array -> unit =
+    fun f ar ->
+      for i = 0 to Array.length ar - 1 do
+        ar.(i) <- f i ar.(i)
+      done
+
+  (* ? *)
+  let map_inplace : 'a. ('a -> 'a) -> 'a array -> unit =
+    fun f ar ->
+      mapi_inplace (fun _i x -> f x) ar
 
 end
 
@@ -214,21 +468,160 @@ struct
 
   include List
 
+  (* !! *)
+  (* IMHO [zip/unzip] are better names than [combine/split], and they are also
+   * consistent with module [Seq] and with Haskell (however, beware that
+   * [List.combine] fails when the lengths differ, whereas [Seq.zip] stops at
+   * the shortest length): *)
+  let zip = combine
+  let unzip = split
+
+  (* ! *)
+  (* consistency with [List.flatten] and [Seq.flat_map], and IMHO [flat_map] is
+   * a more eloquent name than [concat_map]: *)
+  let flat_map = concat_map
+
+  (* ? *)
+  module type TODO = sig
+    (* It would make sense to throw all these variants in a submodule named
+     * [List.Indexed]; this would also spare use the question of how to name
+     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
+     * already exist as of OCaml 5.0. *)
+    (*! val iteri : (int -> 'a -> unit) -> 'a list -> unit !*)
+    (*! val mapi : (int -> 'a -> 'b) -> 'a list -> 'b list !*)
+    val rev_mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
+    val filter_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b t
+    val flat_mapi : (int -> 'a -> 'b t) -> 'a t -> 'b t
+    val concat_mapi : (int -> 'a -> 'b t) -> 'a t -> 'b t
+    val fold_left_mapi : (int -> 'a -> 'b -> 'a * 'c) -> 'a -> 'b t -> 'a * 'c t
+    val fold_lefti : ('a -> int -> 'b -> 'a) -> 'a -> 'b t -> 'a (* !! *)
+    val fold_righti : (int -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b (* ! *)
+    val iter2i : (int -> 'a -> 'b -> unit) -> 'a t -> 'b t -> unit
+    val map2i : (int -> 'a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+    val rev_map2i : (int -> 'a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+    val fold_left2i : ('a -> int -> 'b -> 'c -> 'a) -> 'a -> 'b t -> 'c t -> 'a
+    val fold_right2i : (int -> 'a -> 'b -> 'c -> 'c) -> 'a t -> 'b t -> 'c -> 'c
+    val for_alli : (int -> 'a -> bool) -> 'a t -> bool
+    val existsi : (int -> 'a -> bool) -> 'a t -> bool
+    val for_all2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
+    val exists2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
+    val findi : (int -> 'a -> bool) -> 'a t -> 'a
+    val find_opti : (int -> 'a -> bool) -> 'a t -> 'a option
+    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option
+    (*! val filteri : (int -> 'a -> bool) -> 'a list -> 'a list !*)
+    val find_alli : (int -> 'a -> bool) -> 'a list -> 'a list
+    val partitioni : (int -> 'a -> bool) -> 'a t -> 'a t * 'a t
+    val partition_mapi : (int -> 'a -> ('b, 'c) Either.t) -> 'a t -> 'b t * 'c t
+    val to_seqi : 'a list -> (int * 'a) Seq.t (* ! *) (* done *)
+  end
+
+  (* ! *)
+  let to_seqi : 'a. 'a list -> (int * 'a) Seq.t =
+    let rec to_seqi_aux i xs () =
+      begin match xs with
+      | x :: xs' -> Seq.Cons ((i, x), to_seqi_aux (i+1) xs')
+      | []       -> Seq.Nil
+      end
+    in
+    fun xs -> to_seqi_aux 0 xs
+
+  (* ? *)
+  (* interruptible version of [fold_left]
+   * TODO: the same for [iter], [find], [exists], etc.*)
+  let fold_left_whilei : 'a 'b 'c.
+    ('b -> int -> 'a -> ('c, 'b) Either.t) ->
+    'b -> 'a t -> ('c * 'a t, 'b) Either.t =
+    let rec aux f a i xs =
+      begin match xs with
+      | x :: xs' ->
+          begin match f a i x with
+          | Either.Left z  -> Either.Left (z, xs')
+          | Either.Right y -> aux f y (i+1) xs'
+          end
+      | [] -> Either.Right a
+      end
+    in
+    fun f a xs -> aux f a 0 xs
+
+  (* ! *)
+  let fold_left_while : 'a 'b 'c.
+    ('b -> 'a -> ('c, 'b) Either.t) ->
+    'b -> 'a t -> ('c * 'a t, 'b) Either.t =
+    fun f a s -> fold_left_whilei (fun a i x -> f a x) a s
+
+  (* ! *)
+  let slice : 'a. int -> 'a list -> 'a list * 'a list =
+    let rec slice_aux n pref suff =
+      if n > 0 then
+        begin match suff with
+        | x :: suff' -> slice_aux (n-1) (x :: pref) suff'
+        | []         -> raise (Invalid_argument "List.slice")
+        end
+      else (pref, suff)
+    in
+    fun n xs -> slice_aux n [] xs
+
+  (* ! *)
   let rec take : 'a. int -> 'a list -> 'a list =
     fun n xs ->
-      begin match n, xs with
-      | n, x :: xs' when n > 0 -> x :: take (n-1) xs'
-      | _                      -> []
-      end
+      if n > 0 then
+        begin match xs with
+        | x :: xs' -> x :: take (n-1) xs'  (* TRMC *)
+        | _        -> raise (Invalid_argument "List.take")
+        end
+      else []
 
+  (* ! *)
   let rec drop : 'a. int -> 'a list -> 'a list =
     fun n xs ->
       if n > 0 then
         begin match xs with
         | _ :: xs' -> drop (n-1) xs'
-        | []       -> []
+        | []       -> raise (Invalid_argument "List.drop")
         end
       else xs
+
+  (* ! *)
+  let slice_whilei : 'a. (int -> 'a -> bool) -> 'a list -> 'a list * 'a list =
+    let rec slice_while_aux cond i pref suff =
+      begin match suff with
+      | x :: suff' when cond i x -> slice_while_aux cond (i+1) (x :: pref) suff'
+      | _                        -> (pref, suff)
+      end
+    in
+    fun cond xs -> slice_while_aux cond 0 [] xs
+
+  (* ! *)
+  let slice_while : 'a. ('a -> bool) -> 'a list -> 'a list * 'a list =
+    fun cond xs -> slice_whilei (fun _ -> cond) xs
+
+  (* ? *)
+  let take_whilei : 'a. (int -> 'a -> bool) -> 'a list -> 'a list =
+    let rec take_while_aux cond i xs =
+      begin match xs with
+      | x :: xs' when cond i x -> x :: take_while_aux cond (i+1) xs' (* TRMC *)
+      | _                      -> []
+      end
+    in
+    fun cond xs -> take_while_aux cond 0 xs
+
+  (* ? *)
+  let take_while : 'a. ('a -> bool) -> 'a list -> 'a list =
+    fun cond xs -> take_whilei (fun _ -> cond) xs
+
+  (* ? *)
+  let drop_whilei : 'a. (int -> 'a -> bool) -> 'a list -> 'a list =
+    let rec drop_while_aux cond i xs =
+      begin match xs with
+      | x :: xs' when cond i x -> drop_while_aux cond (i+1) xs'
+      | _                      -> xs
+      end
+    in
+    fun cond xs -> drop_while_aux cond 0 xs
+
+  (* ? *)
+  let drop_while : 'a. ('a -> bool) -> 'a list -> 'a list =
+    fun cond xs -> drop_whilei (fun _ -> cond) xs
 
   let pop_all_seq : 'a. 'a list -> ('a * 'a list) Seq.t =
     let rec pop_all l r () =
@@ -320,14 +713,211 @@ end
 
 (******************************************************************************)
 
-(*
- *  Strings
- *)
+(**
+ **  Sets
+ **)
+
+module Set =
+struct
+
+  include Set
+
+  module type S =
+  sig
+    include S
+    val compare_elt : elt -> elt -> int
+    val flat_map : (elt -> t) -> t -> t
+    val rev_iter : (elt -> unit) -> t -> unit
+    val to_rev_seq_from : elt -> t -> elt Seq.t
+  end
+
+  module Make (Ord : OrderedType) : S with type elt = Ord.t and type t = Set.Make(Ord).t =
+  struct
+
+    include Set.Make (Ord)
+
+    (* BUG REPORT: doc: document that [Stdlib.compare] MUST NOT be used to
+     * compare sets (because a set’s internal representation is not unique). *)
+
+    (* BUG REPORT: doc: document that [Set.compare] is not compatible with set
+     * inclusion. *)
+
+    (* ! *)
+    (* useful/needed when we have some Set.S module but not the Ord module it
+     * was built from: *)
+    let compare_elt = Ord.compare
+
+    (* ! *)
+    (* not entirely satisfying because it is limited to sets of the same type: *)
+    let flat_map f s =
+      fold (fun x s' -> union (f x) s') s empty
+
+    (* ! *)
+    let rev_iter f s =
+      Seq.iter f (to_rev_seq s)
+
+    (* ? *)
+    let to_rev_seq_from x s =
+      (* FIXME: an internal implementation would be more efficient *)
+      Seq.drop_while (fun y -> Ord.compare y x > 0) (to_rev_seq s)
+
+    let to_seq_between x y s =
+      (* FIXME: an internal implementation might be more efficient? *)
+      Seq.take_while (fun z -> Ord.compare z y <= 0) (to_seq_from x s)
+
+    let to_rev_seq_between x y s =
+      (* FIXME: an internal implementation might be more efficient? *)
+      Seq.take_while (fun z -> Ord.compare x z <= 0) (to_rev_seq_from y s)
+
+  end
+
+end
+
+(******************************************************************************)
+
+(**
+ **  Hashtables
+ **)
+
+module Hashtbl =
+struct
+
+  include Hashtbl
+
+  (* ! *)
+  (* consistency with other modules where “find” means searching with
+   * a predicate: *)
+  let get = find
+  let get_opt = find_opt
+  let get_all = find_all
+
+  (* ? *)
+  (* consistency with [Array]: *)
+  let set = add
+
+  (* this general function is useful on its own, and also to implement other
+   * functions (remove, replace, pop) efficiently (i.e. with only one hash
+   * computation and one traversal): *)
+  let get_update : 'k 'v. ('k, 'v) t -> 'k -> ('v option -> 'v option) -> 'v option =
+    (* FIXME: an internal implementation would be more efficient (only one hash
+     * computation and one traversal of the data structure) *)
+    fun ht k f ->
+      let old = Hashtbl.find_opt ht k in
+      begin match old, f old with
+      | None,   Some v'              -> Hashtbl.add ht k v'
+      | Some v, Some v' when v != v' -> Hashtbl.replace ht k v' (* ensure physical equality *)
+      | Some _, None                 -> Hashtbl.remove ht k
+      | _ -> ()
+      end ;
+      old
+
+  (* ! *)
+  let update : 'k 'v. ('k, 'v) t -> 'k -> ('v option -> 'v option) -> unit =
+    fun ht k f -> ignore (get_update ht k f)
+
+  (* ? *)
+  let pop_opt : 'k 'v. ('k, 'v) t -> 'k -> 'v option =
+    fun ht k -> get_update ht k (fun _ -> None)
+
+  (* !! *)
+  let pop : 'k 'v. ('k, 'v) t -> 'k -> 'v =
+    fun ht k -> match pop_opt ht k with Some v -> v | None -> raise Not_found
+
+  (* ? *)
+  let get_or_set' : 'k 'v. ('k, 'v) t -> 'k -> default:(unit -> 'v) -> 'v =
+    (* FIXME: an internal implementation would be more efficient (only one hash
+     * computation and one traversal of the data structure) *)
+    fun ht k ~default ->
+      begin match Hashtbl.find_opt ht k with
+      | None   -> let v = default () in Hashtbl.add ht k v ; v
+      | Some v -> v
+      end
+
+  (* !! *)
+  (* TODO: better naming *)
+  let get_or_set : 'k 'v. ('k, 'v) t -> 'k -> default:'v -> 'v =
+    fun ht k ~default -> get_or_set' ht k ~default:(fun () -> default)
+
+  (* TODO: also patch the functorized interface... *)
+
+  (* BUG REPORT: In Feb 2022 I read the code of Hashtbl in the standard library
+   * and tried to understand how it works against concurrency. My notes from
+   * then:
+   *
+   * [Hashtbl.to_seq] could be made more robust against concurrent/later
+   * modifications (specifically, resizing: currently [to_seq] can yield
+   * bindings several times and skip bindings that at no point (in the history
+   * of the hashtable after the creation of the sequence) are removed from the
+   * hashtable).
+   *
+   * In short, it must use [flip_ongoing_traversal]
+   *
+   * ... in fact [flip_ongoing_traversal] is already not safe against
+   * concurrency?
+   *   - bug case: traversal starts *after* resizing has begun
+   *   - bug case: two concurrent traversals
+   *)
+
+end (* module Hashtbl *)
+
+(******************************************************************************)
+
+(**
+ **  Stacks
+ **)
+
+module Stack =
+struct
+
+  include Stack
+
+  (* ! *)
+  let of_list xs =
+    (* FIXME: an internal implementation would be more efficient (no list
+     * reversal/duplication) *)
+    let st = create () in
+    List.iter (fun x -> push x st) (List.rev xs) ;
+    st
+
+  (* BUG REPORT: doc: the doc for [Stack.of_seq] should specify in which order
+   * the sequence elements are pushed. *)
+
+end (* module Stack *)
+
+
+(******************************************************************************)
+
+(**
+ **  Strings
+ **)
 
 module String =
 struct
 
   include String
+
+  (* ? *)
+  module type TODO = sig
+    (* It would make sense to throw all these variants in a submodule named
+     * [String.Indexed]; this would also spare use the question of how to name
+     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
+     * already exist as of OCaml 5.0. *)
+    (*! val mapi : (int -> char -> char) -> t -> t !*)
+    val fold_lefti : ('a -> int -> char -> 'a) -> 'a -> t -> 'a (* ! *) (* done *)
+    val fold_righti : (int -> char -> 'a -> 'a) -> t -> 'a -> 'a (* ! *) (* done *)
+    val for_alli : (int -> char -> bool) -> t -> bool
+    val existsi : (int -> char -> bool) -> t -> bool
+    (*! val iteri : (int -> char -> unit) -> t -> unit !*)
+    (*! val to_seqi : t -> (int * char) Seq.t !*)
+  end
+
+  (* ! *)
+  let rec fold_lefti (f : 'a -> int -> char -> 'a) (init : 'a) (s : string) : 'a =
+    snd (String.fold_left (fun (i, a) c -> (i+1, f a i c)) (0, init) s)
+
+  (* ! *)
+  let rec fold_righti (f : int -> char -> 'a -> 'a) (s : string) (init : 'a) : 'a =
+    snd (String.fold_right (fun c (i, a) -> (i+1, f i c a)) s (0, init))
 
   let drop (s : string) (n : int) =
     if n = 0 then
@@ -339,6 +929,8 @@ struct
 
   (* NOTE: String.{starts_with,ends_with} have been added to Stdlib in 4.13,
    * without the optional argument ?from / ?til *)
+
+  (* ! *)
   let starts_with ?(from : int = 0) (s : string) (sub : string) : bool =
     let len_s = String.length s in
     let len_sub = String.length sub in
@@ -359,6 +951,7 @@ struct
       end
     end
 
+  (* ! *)
   let ends_with ?(til : int option) (s : string) (sub : string) : bool =
     let len_s = String.length s in
     let len_sub = String.length sub in
@@ -385,6 +978,130 @@ end
 (******************************************************************************)
 
 (**
+ **  Bytes
+ **)
+
+module Bytes =
+struct
+
+  include Bytes
+
+  (* ? *)
+  module type TODO = sig
+    (* It would make sense to throw all these variants in a submodule named
+     * [Bytes.Indexed]; this would also spare use the question of how to name
+     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
+     * already exist as of OCaml 5.0. *)
+    (*! val iteri : (int -> char -> unit) -> t -> unit !*)
+    (*! val mapi : (int -> char -> char) -> t -> t !*)
+    val fold_lefti : ('a -> int -> char -> 'a) -> 'a -> t -> 'a
+    val fold_righti : (int -> char -> 'a -> 'a) -> t -> 'a -> 'a
+    val for_alli : (int -> char -> bool) -> t -> bool
+    val existsi : (int -> char -> bool) -> t -> bool
+    (*! val to_seqi : t -> (int * char) Seq.t !*)
+  end
+
+end
+
+(******************************************************************************)
+
+(**
+ **  Buffers
+ **)
+
+module Buffer =
+struct
+
+  include Buffer
+
+  (* BUG REPORT: the doc says "It provides accumulative concatenation of strings
+   * in linear time"; there should be the word "amortized" here. *)
+
+  (* [get] is a much more expected name than [nth] IMHO *)
+  let get : t -> int -> char = nth
+
+  (* ! *)
+  let set : t -> int -> char -> unit =
+    fun buf i c ->
+      (* FIXME: needs internal implementation *)
+      assert false
+
+  (* ! *)
+  let iteri : t -> (int -> char -> unit) -> unit =
+    fun buf f ->
+      (* FIXME: an internal implementation would be more efficient *)
+      Seq.iter (fun (i, c) -> f i c) (Buffer.to_seqi buf)
+
+  (* ! *)
+  let iter : t -> (char -> unit) -> unit =
+    fun buf f ->
+      (* FIXME: an internal implementation would be more efficient *)
+      Seq.iter f (Buffer.to_seq buf)
+
+end (* module Buffer *)
+
+(******************************************************************************)
+
+(**
+ **  Random
+ **)
+
+module Random =
+struct
+
+  include Random
+
+  (* Random integer generation ([int], [Int32.t], [Int64.t], [Nativeint.t]) in
+   * [Stdlib.Random] does not support the full range of integers: it cannot
+   * generate negative integers, nor the maximum representable integer (because
+   * the upper bound is exclusive). Here are functions that support any integer
+   * range, with included bounds. *)
+
+  (* !! *)
+  let int_in_range ?(min=0) ~max =
+    if min > max then
+      raise (Invalid_argument "Random.int_in_range") ;
+    (* we use the fact that [Int64.t] has at least one bit more than [int]: *)
+    let min = Int64.of_int min
+    and max = Int64.of_int max in
+    let r = Random.int64 (Int64.sub (Int64.succ max) min) in
+    Int64.to_int @@ Int64.add min r
+
+  let int32_in_range ?(min=Int32.zero) ~max =
+    if min > max then
+      raise (Invalid_argument "Random.int32_in_range") ;
+    (* we use the fact that [Int64.t] has more bits than [Int32.t]: *)
+    let min = Int64.of_int32 min
+    and max = Int64.of_int32 max in
+    let r = Random.int64 (Int64.sub (Int64.succ max) min) in
+    Int64.to_int32 @@ Int64.add min r
+
+  let rec int64_in_range ?(min=Int64.zero) ~max =
+    if min > max then
+      raise (Invalid_argument "Random.int64_in_range") ;
+    let d = Int64.sub max min in (* subtraction may overflow! *)
+    (* no overflow and favorable case, we can use the existing function: *)
+    if d >= Int64.zero && d < Int64.max_int then
+      Int64.add min (Random.int64 (Int64.succ d))
+    else
+      (* I tried to do clever stuff by halving the interval and drawing one bit
+       * separately with [Random.bool], but having to deal with parities and
+       * overflows was annoying; in the end, it’s just simpler like that: *)
+      let r = Random.bits64 () in
+      if min <= r && r <= max then r
+      else int64_in_range ~min ~max
+
+  let nativeint_in_range ?(min=Nativeint.zero) ~max =
+    if min > max then
+      raise (Invalid_argument "Random.nativeint") ;
+    Int64.to_nativeint
+      (int64_in_range ~min:(Int64.of_nativeint min) ~max:(Int64.of_nativeint max))
+
+end (* module Random *)
+
+(******************************************************************************)
+
+(**
  **  Logging / Error handling
  **)
 
@@ -407,3 +1124,15 @@ struct
       ("INFO: %s:%i: " ^^ fmt ^^ "\n") !current_filename !current_line
 
 end
+
+(* BUG REPORT: doc: mention that all IO functions can raise [Sys_blocked] when
+ * operating onnon-blocking FDs
+ * https://github.com/ocaml/ocaml/pull/10545#issuecomment-902725645
+ *)
+
+(* ! *)
+(* BUG REPORT: bugs in Printf’s alternate format (#):
+ *   - leading zeros are not thousand-separated
+ *   - [space] and [+] disable the alternate format
+ * https://discuss.ocaml.org/t/pretty-printing-binary-ints/9062/12
+ *)
