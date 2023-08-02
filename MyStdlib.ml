@@ -442,10 +442,11 @@ struct
     in
     fun f ar -> find_idx_sorted f ar 0 (Array.length ar)
 
+  (* added in OCaml 5.2 *)
   let shuffle : 'a. 'a array -> unit =
     fun ar ->
       for i = Array.length ar - 1 downto 1 do
-        let j = Random.full_int i in (* since 4.13 *)
+        let j = Random.full_int (i+1) in (* since 4.13 *)
         let x = ar.(i) in
         ar.(i) <- ar.(j) ;
         ar.(j) <- x ;
