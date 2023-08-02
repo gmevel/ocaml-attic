@@ -192,7 +192,7 @@ struct
     val for_alli : (int -> 'a -> bool) -> 'a t -> bool
     val existsi : (int -> 'a -> bool) -> 'a t -> bool
     val findi : (int -> 'a -> bool) -> 'a t -> 'a option
-    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option
+    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* added in OCaml 5.1 *)
     val iter2i : (int -> 'a -> 'b -> unit) -> 'a t -> 'b t -> unit
     val fold_left2i : ('a -> int -> 'b -> 'c -> 'a) -> 'a -> 'b t -> 'c t -> 'a
     val for_all2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
@@ -268,6 +268,8 @@ end (* module Sval mapi : (int -> 'a -> 'b) -> 'a t -> 'b teq *)
  **  Arrays
  **)
 
+(* TODO: there is also [Float.Array] *)
+
 module Array =
 struct
 
@@ -316,6 +318,7 @@ struct
       end
 
   (* ? *)
+  (* added in OCaml 5.1 *)
   let find_mapi : 'a 'b. (int -> 'a -> 'b option) -> 'a array -> 'b option =
     let rec find_mapi f ar i n =
       if i < n then
@@ -355,6 +358,7 @@ struct
     fun f ar -> findi_idx (fun _i x -> f x) ar
 
   (* ! *)
+  (* added in OCaml 5.1 *)
   let find_idx_opt : 'a. ('a -> bool) -> 'a array -> int option =
     fun f ar -> try Some (find_idx f ar) with Not_found -> None
 
@@ -451,6 +455,7 @@ struct
   (* Note that there exists [Hashtbl.filter_map_inplace] *)
   (* NOTE: A very unsafe version of this function may allow changing the type of
    * the array elements. *)
+  (* added in OCaml 5.1 *)
   let mapi_inplace : 'a. (int -> 'a -> 'a) -> 'a array -> unit =
     fun f ar ->
       for i = 0 to Array.length ar - 1 do
@@ -458,6 +463,7 @@ struct
       done
 
   (* ? *)
+  (* added in OCaml 5.1 *)
   let map_inplace : 'a. ('a -> 'a) -> 'a array -> unit =
     fun f ar ->
       mapi_inplace (fun _i x -> f x) ar
@@ -514,7 +520,7 @@ struct
     val exists2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
     val findi : (int -> 'a -> bool) -> 'a t -> 'a
     val find_opti : (int -> 'a -> bool) -> 'a t -> 'a option
-    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option
+    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* added in OCaml 5.1 *)
     (*! val filteri : (int -> 'a -> bool) -> 'a list -> 'a list !*)
     val find_alli : (int -> 'a -> bool) -> 'a list -> 'a list
     val partitioni : (int -> 'a -> bool) -> 'a t -> 'a t * 'a t
