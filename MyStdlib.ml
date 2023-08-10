@@ -1,4 +1,4 @@
-(* last update: 2023-07-30 (OCaml 5.0) *)
+(* last update: 2023-08-07 (OCaml 5.1) *)
 
 (*
  * Some of the functions below are ones for which I felt the need several times
@@ -182,27 +182,30 @@ struct
   let combine = zip
 
   (* ? *)
-  module type TODO = sig
+  module type INDEXED = sig
     (* It would make sense to throw all these variants in a submodule named
      * [Seq.Indexed]; this would also spare use the question of how to name them
-     * (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that already
-     * exist as of OCaml 5.0. *)
-    (*! val iteri : (int -> 'a -> unit) -> 'a t -> unit !*)
-    (*! val fold_lefti : ('b -> int -> 'a -> 'b) -> 'b -> 'a t -> 'b !*)
+     * (e.g. "filteri_map" or "filter_mapi" ?).
+     * Starting with underscores are those that already exist as of OCaml 5.1. *)
+    val _iteri : (int -> 'a -> unit) -> 'a t -> unit
+    val _fold_lefti : ('b -> int -> 'a -> 'b) -> 'b -> 'a t -> 'b
     val for_alli : (int -> 'a -> bool) -> 'a t -> bool
     val existsi : (int -> 'a -> bool) -> 'a t -> bool
     val findi : (int -> 'a -> bool) -> 'a t -> 'a option
-    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* added in OCaml 5.1 *)
+    val findi_index : (int -> 'a -> bool) -> 'a t -> int option (* OCaml 5.1 *)
+    val _find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* OCaml 5.1 *)
     val iter2i : (int -> 'a -> 'b -> unit) -> 'a t -> 'b t -> unit
     val fold_left2i : ('a -> int -> 'b -> 'c -> 'a) -> 'a -> 'b t -> 'c t -> 'a
     val for_all2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
+    val exists2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
     val unfoldi : ('b -> int -> ('a * 'b) option) -> 'b -> 'a t
     val iteratei : (int -> 'a -> 'a) -> 'a -> 'a t
-    val existsi : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
-    (*! val mapi : (int -> 'a -> 'b) -> 'a t -> 'b t !*)
+    val _mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
     val filteri : (int -> 'a -> bool) -> 'a t -> 'a t
     val filter_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b t
     val scani : (int -> 'b -> 'a -> 'b) -> 'b -> 'a t -> 'b t
+    val take_whilei : (int -> 'a -> bool) -> 'a t -> 'a t (* done below *)
+    val drop_whilei : (int -> 'a -> bool) -> 'a t -> 'a t (* done below *)
     val groupi : (int -> 'a -> 'a -> bool) -> 'a t -> 'a t t
     val flat_mapi : (int -> 'a -> 'b t) -> 'a t -> 'b t
     val concat_mapi : (int -> 'a -> 'b t) -> 'a t -> 'b t
@@ -259,7 +262,7 @@ struct
   (* BUG REPORT: doc: document that the order in [Seq.product] is compatible
    * with the pointwise order *)
 
-end (* module Sval mapi : (int -> 'a -> 'b) -> 'a t -> 'b teq *)
+end (* module Seq *)
 
 
 (******************************************************************************)
@@ -284,13 +287,14 @@ struct
   let unzip = split
 
   (* ? *)
-  module type TODO = sig
+  module type INDEXED = sig
     (* It would make sense to throw all these variants in a submodule named
      * [Array.Indexed]; this would also spare use the question of how to name
-     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
-     * already exist as of OCaml 5.0. *)
-    (*! val iteri : (int -> 'a -> unit) -> 'a t -> unit !*)
-    (*! val mapi : (int -> 'a -> 'b) -> 'a t -> 'b t !*)
+     * them (e.g. "filteri_map" or "filter_mapi" ?).
+     * Starting with underscores are those that already exist as of OCaml 5.1. *)
+    val _iteri : (int -> 'a -> unit) -> 'a t -> unit
+    val _mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
+    val _mapi_inplace : (int -> 'a -> 'a) -> 'a array -> unit (* OCaml 5.1; done below *)
     val fold_lefti : ('a -> int -> 'b -> 'a) -> 'a -> 'b t -> 'a (* !! *)
     val fold_left_mapi : (int -> 'a -> 'b -> 'a * 'c) -> 'a -> 'b t -> 'a * 'c t
     val fold_righti : (int -> 'b -> 'a -> 'a) -> 'b t -> 'a -> 'a
@@ -300,8 +304,10 @@ struct
     val existsi : (int -> 'a -> bool) -> 'a t -> bool
     val for_all2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
     val exists2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
-    val findi_opt : (int -> 'a -> bool) -> 'a t -> 'a option (* ! *) (* done *)
-    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* done *)
+    val findi_opt : (int -> 'a -> bool) -> 'a t -> 'a option (* ! *) (* done below *)
+    val findi_index : (int -> 'a -> bool) -> 'a array -> int option (* OCaml 5.1; done below *)
+    val _find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* OCaml 5.1; done below *)
+    val _to_seqi : 'a array -> (int * 'a) Seq.t
   end
 
   (* !! *)
@@ -496,13 +502,13 @@ struct
   let flat_map = concat_map
 
   (* ? *)
-  module type TODO = sig
+  module type INDEXED = sig
     (* It would make sense to throw all these variants in a submodule named
      * [List.Indexed]; this would also spare use the question of how to name
-     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
-     * already exist as of OCaml 5.0. *)
-    (*! val iteri : (int -> 'a -> unit) -> 'a list -> unit !*)
-    (*! val mapi : (int -> 'a -> 'b) -> 'a list -> 'b list !*)
+     * them (e.g. "filteri_map" or "filter_mapi" ?).
+     * Starting with underscores are those that already exist as of OCaml 5.1. *)
+    val _iteri : (int -> 'a -> unit) -> 'a t -> unit
+    val _mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
     val rev_mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
     val filter_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b t
     val flat_mapi : (int -> 'a -> 'b t) -> 'a t -> 'b t
@@ -521,12 +527,13 @@ struct
     val exists2i : (int -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
     val findi : (int -> 'a -> bool) -> 'a t -> 'a
     val find_opti : (int -> 'a -> bool) -> 'a t -> 'a option
-    val find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* added in OCaml 5.1 *)
-    (*! val filteri : (int -> 'a -> bool) -> 'a list -> 'a list !*)
-    val find_alli : (int -> 'a -> bool) -> 'a list -> 'a list
+    val findi_index : (int -> 'a -> bool) -> 'a t -> int option (* OCaml 5.1 *)
+    val _find_mapi : (int -> 'a -> 'b option) -> 'a t -> 'b option (* OCaml 5.1 *)
+    val _filteri : (int -> 'a -> bool) -> 'a t -> 'a t
+    val find_alli : (int -> 'a -> bool) -> 'a t -> 'a t
     val partitioni : (int -> 'a -> bool) -> 'a t -> 'a t * 'a t
     val partition_mapi : (int -> 'a -> ('b, 'c) Either.t) -> 'a t -> 'b t * 'c t
-    val to_seqi : 'a list -> (int * 'a) Seq.t (* ! *) (* done *)
+    val to_seqi : 'a t -> (int * 'a) Seq.t (* ! *) (* done below *)
   end
 
   (* ! *)
@@ -911,18 +918,18 @@ struct
   include String
 
   (* ? *)
-  module type TODO = sig
+  module type INDEXED = sig
     (* It would make sense to throw all these variants in a submodule named
      * [String.Indexed]; this would also spare use the question of how to name
-     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
-     * already exist as of OCaml 5.0. *)
-    (*! val mapi : (int -> char -> char) -> t -> t !*)
-    val fold_lefti : ('a -> int -> char -> 'a) -> 'a -> t -> 'a (* ! *) (* done *)
-    val fold_righti : (int -> char -> 'a -> 'a) -> t -> 'a -> 'a (* ! *) (* done *)
+     * them (e.g. "filteri_map" or "filter_mapi" ?).
+     * Starting with underscores are those that already exist as of OCaml 5.1. *)
+    val _mapi : (int -> char -> char) -> t -> t
+    val fold_lefti : ('a -> int -> char -> 'a) -> 'a -> t -> 'a (* ! *) (* done below *)
+    val fold_righti : (int -> char -> 'a -> 'a) -> t -> 'a -> 'a (* ! *) (* done below *)
     val for_alli : (int -> char -> bool) -> t -> bool
     val existsi : (int -> char -> bool) -> t -> bool
-    (*! val iteri : (int -> char -> unit) -> t -> unit !*)
-    (*! val to_seqi : t -> (int * char) Seq.t !*)
+    val _iteri : (int -> char -> unit) -> t -> unit
+    val _to_seqi : t -> (int * char) Seq.t
   end
 
   (* ! *)
@@ -1001,18 +1008,18 @@ struct
   include Bytes
 
   (* ? *)
-  module type TODO = sig
+  module type INDEXED = sig
     (* It would make sense to throw all these variants in a submodule named
      * [Bytes.Indexed]; this would also spare use the question of how to name
-     * them (e.g. "filteri_map" or "filter_mapi" ?). Commented are those that
-     * already exist as of OCaml 5.0. *)
-    (*! val iteri : (int -> char -> unit) -> t -> unit !*)
-    (*! val mapi : (int -> char -> char) -> t -> t !*)
+     * them (e.g. "filteri_map" or "filter_mapi" ?).
+     * Starting with underscores are those that already exist as of OCaml 5.1. *)
+    val _iteri : (int -> char -> unit) -> t -> unit
+    val _mapi : (int -> char -> char) -> t -> t
     val fold_lefti : ('a -> int -> char -> 'a) -> 'a -> t -> 'a
     val fold_righti : (int -> char -> 'a -> 'a) -> t -> 'a -> 'a
     val for_alli : (int -> char -> bool) -> t -> bool
     val existsi : (int -> char -> bool) -> t -> bool
-    (*! val to_seqi : t -> (int * char) Seq.t !*)
+    val _to_seqi : t -> (int * char) Seq.t
   end
 
 end
