@@ -336,80 +336,80 @@ struct
     fun f ar -> find_mapi f ar 0 (Array.length ar)
 
   (* ? *)
-  let findi_idx : 'a. (int -> 'a -> bool) -> 'a array -> int =
+  let findi_index : 'a. (int -> 'a -> bool) -> 'a array -> int =
     (*! fun f ar -> find_mapi_exn (fun i x -> if f i x then Some i else None) ar !*)
-    let rec findi_idx f ar i n =
+    let rec findi_index f ar i n =
       if i < n then
         if f i ar.(i) then i
-        else findi_idx f ar (i+1) n
+        else findi_index f ar (i+1) n
       else raise Not_found
     in
-    fun f ar -> findi_idx f ar 0 (Array.length ar)
+    fun f ar -> findi_index f ar 0 (Array.length ar)
 
   (* !! *)
-  let findi_idx_opt : 'a. (int -> 'a -> bool) -> 'a array -> int option =
+  let findi_index_opt : 'a. (int -> 'a -> bool) -> 'a array -> int option =
     (*! fun f ar -> find_mapi (fun i x -> if f i x then Some i else None) ar !*)
-    fun f ar -> try Some (findi_idx f ar) with Not_found -> None
+    fun f ar -> try Some (findi_index f ar) with Not_found -> None
 
   (* ? *)
   let findi : 'a. (int -> 'a -> bool) -> 'a array -> 'a =
-    fun f ar -> ar.(findi_idx f ar)
+    fun f ar -> ar.(findi_index f ar)
 
   (* ! *)
   let findi_opt : 'a. (int -> 'a -> bool) -> 'a array -> 'a option =
     fun f ar -> try Some (findi f ar) with Not_found -> None
 
   (* ? *)
-  let find_idx : 'a. ('a -> bool) -> 'a array -> int =
-    fun f ar -> findi_idx (fun _i x -> f x) ar
+  let find_index : 'a. ('a -> bool) -> 'a array -> int =
+    fun f ar -> findi_index (fun _i x -> f x) ar
 
   (* ! *)
   (* added in OCaml 5.1 *)
-  let find_idx_opt : 'a. ('a -> bool) -> 'a array -> int option =
-    fun f ar -> try Some (find_idx f ar) with Not_found -> None
+  let find_index_opt : 'a. ('a -> bool) -> 'a array -> int option =
+    fun f ar -> try Some (find_index f ar) with Not_found -> None
 
   (* ? *)
-  let mem_idx : 'a. 'a -> 'a array -> int =
-    fun x ar -> find_idx ((=) x) ar
+  let mem_index : 'a. 'a -> 'a array -> int =
+    fun x ar -> find_index ((=) x) ar
 
   (* !! *)
-  let mem_idx_opt : 'a. 'a -> 'a array -> int option =
-    fun x ar -> find_idx_opt ((=) x) ar
+  let mem_index_opt : 'a. 'a -> 'a array -> int option =
+    fun x ar -> find_index_opt ((=) x) ar
 
   (* ? *)
-  let memq_idx : 'a. 'a -> 'a array -> int =
-    fun x ar -> find_idx ((==) x) ar
+  let memq_index : 'a. 'a -> 'a array -> int =
+    fun x ar -> find_index ((==) x) ar
 
   (* ? *)
-  let memq_idx_opt : 'a. 'a -> 'a array -> int option =
-    fun x ar -> find_idx_opt ((==) x) ar
+  let memq_index_opt : 'a. 'a -> 'a array -> int option =
+    fun x ar -> find_index_opt ((==) x) ar
 
   (*
-  let find_all_idx : 'a. ('a -> bool) -> 'a array -> int list =
-    let rec find_all_idx f ar i n acc =
+  let find_all_indexes : 'a. ('a -> bool) -> 'a array -> int list =
+    let rec find_all_indexes f ar i n acc =
       if i < n then
-        if f ar.(i) then find_all_idx f ar (i+1) n (i :: acc)
-        else find_all_idx f ar (i+1) n acc
+        if f ar.(i) then find_all_indexes f ar (i+1) n (i :: acc)
+        else find_all_indexes f ar (i+1) n acc
       else List.rev acc
     in
-    fun f ar -> find_all_idx f ar 0 (Array.length ar) []
+    fun f ar -> find_all_indexes f ar 0 (Array.length ar) []
   *)
 
-  let find_all_idx : 'a. ('a -> bool) -> 'a array -> int Seq.t =
-    let rec find_all_idx f ar i n () =
+  let find_all_indexes : 'a. ('a -> bool) -> 'a array -> int Seq.t =
+    let rec find_all_indexes f ar i n () =
       if i < n then
-        if f ar.(i) then Seq.Cons (i, find_all_idx f ar (i+1) n)
-        else find_all_idx f ar (i+1) n ()
+        if f ar.(i) then Seq.Cons (i, find_all_indexes f ar (i+1) n)
+        else find_all_indexes f ar (i+1) n ()
       else Seq.Nil
     in
-    fun f ar -> find_all_idx f ar 0 (Array.length ar)
+    fun f ar -> find_all_indexes f ar 0 (Array.length ar)
 
   (* Example use: assuming that [a] is sorted w.r.t [compare], then
-   * [Array.find_idx_sorted (compare x) a] returns [Ok i] if the element [x] is
-   * present in [a] at index [i], or [Error i] if it is not present and [i] is
-   * the index where inserting [x] would preserve the order.
+   * [Array.find_index_sorted (compare x) a] returns [Ok i] if the element [x]
+   * is present in [a] at index [i], or [Error i] if it is not present and [i]
+   * is the index where inserting [x] would preserve the order.
    *
-   * More generally, [find_idx_sorted pred ar] assumes that the sign of the
+   * More generally, [find_index_sorted pred ar] assumes that the sign of the
    * predicate [pred] is weakly decreasing over successive elements of the array
    * [ar]. In other words, the array is divided into 3 chunks, which may all be
    * empty:
@@ -432,21 +432,21 @@ struct
    * Note that, when the predicate is positive for all elements of the array,
    * the function returns [Error (Array.length ar)].
    *)
-  let find_idx_sorted : 'a. ('a -> int) -> 'a array -> (int, int) result =
-    let rec find_idx_sorted f ar i j =
+  let find_index_sorted : 'a. ('a -> int) -> 'a array -> (int, int) result =
+    let rec find_index_sorted f ar i j =
       assert (0 <= i && i <= j && j <= Array.length ar) ;
       if i < j then begin
         let k = ((j-i) lsr 1) + i in (* this is (i+j)/2 but avoids overflows *)
         let r = f ar.(k) in
         if r = 0 then Ok k
         else if r < 0 then
-          find_idx_sorted f ar i k
+          find_index_sorted f ar i k
         else
-          find_idx_sorted f ar (k+1) j
+          find_index_sorted f ar (k+1) j
       end
       else Error i
     in
-    fun f ar -> find_idx_sorted f ar 0 (Array.length ar)
+    fun f ar -> find_index_sorted f ar 0 (Array.length ar)
 
   (* added in OCaml 5.2 *)
   let shuffle : 'a. 'a array -> unit =
