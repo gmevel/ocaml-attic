@@ -182,6 +182,9 @@ struct
   let combine = zip
 
   (* ? *)
+  (* See:
+   * https://discuss.ocaml.org/t/adding-indexed-variants-of-all-functions-in-stdlib/12792
+   *)
   module type INDEXED = sig
     (* It would make sense to throw all these variants in a submodule named
      * [Seq.Indexed]; this would also spare use the question of how to name them
@@ -311,6 +314,7 @@ struct
   end
 
   (* !! *)
+  (* submitted for inclusion into OCaml 5.2: PR #12455 *)
   let init_matrix : 'a. int -> int -> (int -> int -> 'a) -> 'a array array =
     fun m n f ->
       Array.init m (fun i -> Array.init n (fun j -> f i j))
@@ -778,6 +782,7 @@ struct
       Seq.iter f (to_rev_seq s)
 
     (* ? *)
+    (* submitted for inclusion into OCaml 5.2: PR #12474 *)
     let to_rev_seq_from x s =
       (* FIXME: an internal implementation would be more efficient *)
       Seq.drop_while (fun y -> Ord.compare y x > 0) (to_rev_seq s)
@@ -815,6 +820,8 @@ struct
   (* ? *)
   (* consistency with [Array]: *)
   let set = add
+
+  (* Note that there exists [Hashtbl.filter_map_inplace] *)
 
   (* this general function is useful on its own, and also to implement other
    * functions (remove, replace, pop) efficiently (i.e. with only one hash
@@ -893,6 +900,7 @@ struct
   include Stack
 
   (* ! *)
+  (* submitted for inclusion into OCaml 5.2: PR #12458 *)
   let of_list xs =
     (* FIXME: an internal implementation would be more efficient (no list
      * reversal/duplication) *)
@@ -1078,6 +1086,8 @@ struct
    * the upper bound is exclusive). Here are functions that support any integer
    * range, with included bounds. *)
 
+  (* submitted for inclusion into OCaml 5.2: PR #12459 *)
+
   (* !! *)
   let int_in_range ?(min=0) ~max =
     if min > max then
@@ -1085,6 +1095,7 @@ struct
     (* we use the fact that [Int64.t] has at least one bit more than [int]: *)
     let min = Int64.of_int min
     and max = Int64.of_int max in
+    (* BUG: Int64.(sub max min) may be equal to Int64.max_int *)
     let r = Random.int64 (Int64.sub (Int64.succ max) min) in
     Int64.to_int @@ Int64.add min r
 
